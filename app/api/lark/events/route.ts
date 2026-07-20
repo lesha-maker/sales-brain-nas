@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBoardSnapshot } from "../../../lib/monday";
 import { replyToLarkMessage } from "../../../lib/lark";
+import { answerSalesQuestion } from "../../../lib/sales-brain";
 
 type LarkEventPayload = {
   challenge?: string;
@@ -76,48 +77,5 @@ async function answerFromSalesBoard(question: string) {
   }
 
   const { deals } = await getBoardSnapshot(boardId);
-  const normalized = question.toLowerCase();
-  const weighted = deals.reduce(
-    (sum, deal) => sum + deal.value * (deal.probability / 100),
-    0,
-  );
-  const atRisk = deals
-    .filter((deal) => deal.health !== "Green")
-    .sort((a, b) => b.value * b.probability - a.value * a.probability)
-    .slice(0, 5);
-  const fit = deals
-    .filter((deal) => deal.stage === "Fit")
-    .sort((a, b) => b.value * b.probability - a.value * a.probability)
-    .slice(0, 5);
-
-  if (normalized.includes("stuck") || normalized.includes("risk")) {
-    return [
-      `I found ${atRisk.length} top risk records to check first:`,
-      ...atRisk.map(
-        (deal) =>
-          `- ${deal.account}: ${deal.stage}, ${deal.budget}, owner ${deal.owner}, next step: ${deal.nextStep}`,
-      ),
-    ].join("\n");
-  }
-
-  if (normalized.includes("fit") || normalized.includes("qualified")) {
-    return [
-      `Top Fit records from monday:`,
-      ...fit.map(
-        (deal) =>
-          `- ${deal.account}: ${deal.budget}, ${deal.country || "no country"}, owner ${deal.owner}`,
-      ),
-    ].join("\n");
-  }
-
-  if (normalized.includes("pipeline") || normalized.includes("forecast")) {
-    return `Loaded ${deals.length} monday records. Estimated weighted pipeline is $${Math.round(
-      weighted,
-    ).toLocaleString("en-US")}.`;
-  }
-
-  return [
-    `I loaded ${deals.length} monday records.`,
-    `Ask me: "what deals are stuck?", "show top fit leads", or "what is pipeline forecast?"`,
-  ].join("\n");
+  return answerSalesQuestion({ question, deals });
 }
