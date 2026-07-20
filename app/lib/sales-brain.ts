@@ -47,6 +47,7 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
     .filter((deal) => deal.stage === "Fit")
     .sort((a, b) => b.value * b.probability - a.value * a.probability)
     .slice(0, 5);
+  const salesQualified = deals.filter((deal) => deal.stage === "Sales Qualified");
 
   if (normalized.includes("stuck") || normalized.includes("risk")) {
     return [
@@ -56,6 +57,10 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
           `- ${deal.account}: ${deal.stage}, ${deal.budget}, owner ${deal.owner}, next step: ${deal.nextStep}`,
       ),
     ].join("\n");
+  }
+
+  if (normalized.includes("sales qualified")) {
+    return `There are ${salesQualified.length} leads in Call Stage = Sales Qualified.`;
   }
 
   if (normalized.includes("fit") || normalized.includes("qualified")) {

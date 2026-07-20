@@ -39,6 +39,7 @@ export async function mondayRequest<T>({
     headers: {
       Authorization: token,
       "Content-Type": "application/json",
+      "API-Version": "2026-04",
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -65,6 +66,7 @@ export async function getBoardSnapshot(boardId: string) {
       id: string;
       name: string;
       columns: Array<{ id: string; title: string; type: string; settings_str?: string }>;
+      calculatedColumns: Array<{ id: string; title: string; type: string; settings_str?: string }>;
       items_page: {
         cursor?: string;
         items: MondayItem[];
@@ -82,13 +84,19 @@ export async function getBoardSnapshot(boardId: string) {
             type
             settings_str
           }
+          calculatedColumns: columns(capabilities: [CALCULATED]) {
+            id
+            title
+            type
+            settings_str
+          }
           items_page(limit: 500) {
             cursor
             items {
               id
               name
               group { id title }
-              column_values {
+              column_values(capabilities: [CALCULATED]) {
                 id
                 text
                 value
@@ -119,6 +127,10 @@ export async function getBoardSnapshot(boardId: string) {
     }
   }
 
+  if (board) {
+    board.columns = mergeColumns(board.columns, board.calculatedColumns);
+  }
+
   return {
     board,
     deals: board ? normalizeDeals(board) : [],
@@ -140,7 +152,7 @@ async function getNextItemsPage(cursor: string) {
             id
             name
             group { id title }
-            column_values {
+            column_values(capabilities: [CALCULATED]) {
               id
               text
               value
@@ -159,6 +171,16 @@ async function getNextItemsPage(cursor: string) {
   });
 
   return data.next_items_page;
+}
+
+function mergeColumns(
+  columns: Array<{ id: string; title: string; type: string; settings_str?: string }>,
+  calculatedColumns: Array<{ id: string; title: string; type: string; settings_str?: string }>,
+) {
+  return [...columns, ...calculatedColumns].filter(
+    (column, index, allColumns) =>
+      allColumns.findIndex((candidate) => candidate.id === column.id) === index,
+  );
 }
 
 type MondayItem = {
