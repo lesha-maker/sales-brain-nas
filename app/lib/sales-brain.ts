@@ -44,17 +44,17 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
     .sort((a, b) => b.value * b.probability - a.value * a.probability)
     .slice(0, 5);
   const fit = deals
-    .filter((deal) => deal.stage === "Fit")
+    .filter((deal) => deal.qualification === "Fit")
     .sort((a, b) => b.value * b.probability - a.value * a.probability)
     .slice(0, 5);
-  const salesQualified = deals.filter((deal) => deal.stage === "Sales Qualified");
+  const salesQualified = deals.filter((deal) => deal.callStage === "Sales Qualified");
 
   if (normalized.includes("stuck") || normalized.includes("risk")) {
     return [
       `I found ${atRisk.length} top risk records to check first:`,
       ...atRisk.map(
         (deal) =>
-          `- ${deal.account}: ${deal.stage}, ${deal.budget}, owner ${deal.owner}, next step: ${deal.nextStep}`,
+          `- ${deal.account}: ${deal.callStage || deal.stage}, ${deal.budget}, owner ${deal.owner}, next step: ${deal.nextStep}`,
       ),
     ].join("\n");
   }
@@ -159,10 +159,13 @@ async function askOpenAI({
 
 function buildCrmSummary(deals: SalesDeal[]) {
   const stageSummaries = summarizeByStage(deals);
+  const callStageSummaries = summarizeByColumn(deals, (deal) => deal.callStage || "Blank");
+  const nextStepSummaries = summarizeByColumn(deals, (deal) => deal.nextStepsStatus || "Blank");
+  const finalVerdictSummaries = summarizeByColumn(deals, (deal) => deal.finalVerdict || "Blank");
   const ownerSummaries = summarizeByOwner(deals);
-  const topFit = topDeals(deals.filter((deal) => deal.stage === "Fit"), 12);
-  const topReview = topDeals(deals.filter((deal) => deal.stage === "Review"), 12);
-  const topNotFit = topDeals(deals.filter((deal) => deal.stage === "Not Fit"), 8);
+  const topFit = topDeals(deals.filter((deal) => deal.qualification === "Fit"), 12);
+  const topReview = topDeals(deals.filter((deal) => deal.qualification === "Review"), 12);
+  const topNotFit = topDeals(deals.filter((deal) => deal.qualification === "Not Fit"), 8);
   const missingOwnerCount = deals.filter((deal) => deal.owner === "Unassigned").length;
   const noBudgetCount = deals.filter((deal) => deal.budget === "Unknown").length;
   const weightedPipeline = deals.reduce(
@@ -177,6 +180,9 @@ function buildCrmSummary(deals: SalesDeal[]) {
     weightedPipeline: Math.round(weightedPipeline),
     healthCounts: countBy(deals, (deal) => deal.health),
     stageSummaries,
+    callStageSummaries,
+    nextStepSummaries,
+    finalVerdictSummaries,
     ownerSummaries,
     dataQuality: {
       missingOwnerCount,
@@ -189,13 +195,18 @@ function buildCrmSummary(deals: SalesDeal[]) {
 }
 
 function summarizeByStage(deals: SalesDeal[]) {
+  return summarizeByColumn(deals, (deal) => deal.stage);
+}
+
+function summarizeByColumn(deals: SalesDeal[], keyFor: (deal: SalesDeal) => string) {
   const summaries = new Map<string, StageSummary>();
 
   for (const deal of deals) {
+    const key = keyFor(deal);
     const current =
-      summaries.get(deal.stage) ||
+      summaries.get(key) ||
       ({
-        stage: deal.stage,
+        stage: key,
         count: 0,
         estimatedBudget: 0,
         weightedPipeline: 0,
@@ -204,7 +215,7 @@ function summarizeByStage(deals: SalesDeal[]) {
     current.count += 1;
     current.estimatedBudget += deal.value;
     current.weightedPipeline += deal.value * (deal.probability / 100);
-    summaries.set(deal.stage, current);
+    summaries.set(key, current);
   }
 
   return [...summaries.values()]
@@ -220,8 +231,8 @@ function summarizeByOwner(deals: SalesDeal[]) {
     .map(([owner, ownerDeals]) => ({
       owner,
       count: ownerDeals.length,
-      fitCount: ownerDeals.filter((deal) => deal.stage === "Fit").length,
-      reviewCount: ownerDeals.filter((deal) => deal.stage === "Review").length,
+      fitCount: ownerDeals.filter((deal) => deal.qualification === "Fit").length,
+      reviewCount: ownerDeals.filter((deal) => deal.qualification === "Review").length,
       estimatedBudget: ownerDeals.reduce((sum, deal) => sum + deal.value, 0),
       weightedPipeline: Math.round(
         ownerDeals.reduce((sum, deal) => sum + deal.value * (deal.probability / 100), 0),
@@ -239,6 +250,14 @@ function topDeals(deals: SalesDeal[], limit: number) {
       account: deal.account,
       owner: deal.owner,
       stage: deal.stage,
+      qualification: deal.qualification,
+      initialOutreach: deal.initialOutreach,
+      callStage: deal.callStage,
+      nextStepsStatus: deal.nextStepsStatus,
+      finalVerdict: deal.finalVerdict,
+      firstMeetingDate: deal.firstMeetingDate,
+      latestMeetingDate: deal.latestMeetingDate,
+      lastFollowUpDate: deal.lastFollowUpDate,
       budget: deal.budget,
       estimatedValue: deal.value,
       probability: deal.probability,

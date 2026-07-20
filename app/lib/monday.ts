@@ -5,6 +5,14 @@ export type SalesDeal = {
   account: string;
   owner: string;
   stage: string;
+  qualification: string;
+  initialOutreach: string;
+  callStage: string;
+  nextStepsStatus: string;
+  finalVerdict: string;
+  firstMeetingDate: string;
+  latestMeetingDate: string;
+  lastFollowUpDate: string;
   value: number;
   closeDate: string;
   health: "Green" | "Yellow" | "Red";
@@ -101,6 +109,12 @@ export async function getBoardSnapshot(boardId: string) {
                 text
                 value
                 type
+                ... on BatteryValue {
+                  battery_value {
+                    key
+                    count
+                  }
+                }
               }
               updates(limit: 3) {
                 id
@@ -152,12 +166,18 @@ async function getNextItemsPage(cursor: string) {
             id
             name
             group { id title }
-            column_values(capabilities: [CALCULATED]) {
-              id
-              text
-              value
-              type
-            }
+              column_values(capabilities: [CALCULATED]) {
+                id
+                text
+                value
+                type
+                ... on BatteryValue {
+                  battery_value {
+                    key
+                    count
+                  }
+                }
+              }
             updates(limit: 3) {
               id
               body
@@ -192,6 +212,7 @@ type MondayItem = {
     text?: string | null;
     value?: string | null;
     type: string;
+    battery_value?: Array<{ key: string; count: number }> | null;
   }>;
   updates?: Array<{ id: string; body: string; created_at: string }>;
 };
@@ -221,35 +242,71 @@ const columns = {
   added: "date_mm4tf2tz",
 };
 
-function normalizeDeals(board: { id: string; items_page: { items: MondayItem[] } }) {
+function normalizeDeals(board: {
+  id: string;
+  columns: Array<{ id: string; title: string; type: string; settings_str?: string }>;
+  items_page: { items: MondayItem[] };
+}) {
+  const columnLabels = new Map(
+    board.columns.map((column) => [column.id, parseStatusLabels(column.settings_str)]),
+  );
+
   return board.items_page.items.map((item) => {
-    const valueFor = (columnId: string) =>
-      item.column_values.find((column) => column.id === columnId)?.text?.trim() ?? "";
+    const valueFor = (columnId: string) => {
+      const column = item.column_values.find((value) => value.id === columnId);
+      if (!column) return "";
+
+      const text = column.text?.trim();
+      if (text) return text;
+
+      const labels = columnLabels.get(columnId) || {};
+      if (column.battery_value?.length) {
+        return column.battery_value
+          .map((value) => labels[String(value.key)] || value.key)
+          .filter(Boolean)
+          .join(", ");
+      }
+
+      if (column.value) {
+        try {
+          const parsed = JSON.parse(column.value) as { index?: string | number };
+          if (parsed.index !== undefined) return labels[String(parsed.index)] || "";
+        } catch {}
+      }
+
+      return "";
+    };
 
     const notes = valueFor(columns.notes);
     const inferredVerdict = verdictFromNotes(notes);
+    const qualification = valueFor(columns.qualification);
+    const initialOutreach = valueFor(columns.outreach);
+    const callStage = valueFor(columns.callStage);
+    const nextStepsStatus = valueFor(columns.nextStepsStatus);
+    const finalVerdict = valueFor(columns.finalVerdict);
+    const firstMeetingDate = valueFor(columns.firstMeeting);
+    const latestMeetingDate = valueFor(columns.latestMeeting);
+    const lastFollowUpDate = valueFor(columns.lastFollowUpDate);
     const stage =
       firstPresent([
-        valueFor(columns.finalVerdict),
+        finalVerdict,
         inferredVerdict,
-        valueFor(columns.nextStepsStatus),
-        valueFor(columns.callStage),
-        valueFor(columns.outreach),
-        valueFor(columns.qualification),
+        nextStepsStatus,
+        callStage,
+        initialOutreach,
+        qualification,
         valueFor(columns.source),
         item.group?.title,
       ]) || "Unstaged";
 
     const lastActivityDate =
       firstPresent([
-        valueFor(columns.lastFollowUpDate),
-        valueFor(columns.latestMeeting),
-        valueFor(columns.firstMeeting),
+        lastFollowUpDate,
+        latestMeetingDate,
+        firstMeetingDate,
         valueFor(columns.added),
       ]) || "";
 
-    const finalVerdict = valueFor(columns.finalVerdict);
-    const qualification = valueFor(columns.qualification);
     const budget = valueFor(columns.budget);
     const probability = probabilityFrom({
       probability: valueFor(columns.probability),
@@ -265,11 +322,19 @@ function normalizeDeals(board: { id: string; items_page: { items: MondayItem[] }
       account: item.name,
       owner: valueFor(columns.owner) || "Unassigned",
       stage,
+      qualification,
+      initialOutreach,
+      callStage,
+      nextStepsStatus,
+      finalVerdict,
+      firstMeetingDate,
+      latestMeetingDate,
+      lastFollowUpDate,
       value: estimatedBudgetValue(budget),
       closeDate:
         firstPresent([
-          valueFor(columns.latestMeeting),
-          valueFor(columns.firstMeeting),
+          latestMeetingDate,
+          firstMeetingDate,
           valueFor(columns.added),
         ]) || "No date",
       health: healthFor({
@@ -295,6 +360,14 @@ function normalizeDeals(board: { id: string; items_page: { items: MondayItem[] }
       mondayUrl: `https://nas-io.monday.com/boards/${board.id}/pulses/${item.id}`,
     } satisfies SalesDeal;
   });
+}
+
+function parseStatusLabels(settings?: string) {
+  try {
+    return (JSON.parse(settings || "{}").labels || {}) as Record<string, string>;
+  } catch {
+    return {};
+  }
 }
 
 function firstPresent(values: Array<string | undefined | null>) {

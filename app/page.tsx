@@ -9,6 +9,14 @@ const sampleDeals: SalesDeal[] = [
     account: "Northstar Logistics",
     owner: "Ari",
     stage: "Proposal",
+    qualification: "Fit",
+    initialOutreach: "Emailed",
+    callStage: "Sales Qualified",
+    nextStepsStatus: "Proposal Stage",
+    finalVerdict: "",
+    firstMeetingDate: "2026-07-12",
+    latestMeetingDate: "2026-07-20",
+    lastFollowUpDate: "2026-07-23",
     value: 82000,
     closeDate: "2026-07-31",
     health: "Yellow",
@@ -27,6 +35,14 @@ const sampleDeals: SalesDeal[] = [
     account: "Helio Retail Group",
     owner: "Mina",
     stage: "Negotiation",
+    qualification: "Fit",
+    initialOutreach: "LinkedIn Outreach",
+    callStage: "Booked a Meeting",
+    nextStepsStatus: "Proposal Done",
+    finalVerdict: "Followed-Up",
+    firstMeetingDate: "2026-07-08",
+    latestMeetingDate: "2026-07-18",
+    lastFollowUpDate: "2026-07-19",
     value: 146000,
     closeDate: "2026-08-08",
     health: "Green",
@@ -45,6 +61,14 @@ const sampleDeals: SalesDeal[] = [
     account: "Tandem Clinics",
     owner: "Jon",
     stage: "Review",
+    qualification: "Review",
+    initialOutreach: "Emailed",
+    callStage: "In Review",
+    nextStepsStatus: "",
+    finalVerdict: "",
+    firstMeetingDate: "",
+    latestMeetingDate: "",
+    lastFollowUpDate: "2026-07-04",
     value: 41000,
     closeDate: "2026-08-19",
     health: "Red",
@@ -106,7 +130,7 @@ function answerQuestion(question: string, deals: SalesDeal[]) {
       .slice(0, 5)
       .map(
         (deal) =>
-          `${deal.account} (${deal.stage}, ${deal.lastActivityDays} days quiet, owner: ${deal.owner})`,
+          `${deal.account} (${deal.callStage || deal.stage}, ${deal.lastActivityDays} days quiet, owner: ${deal.owner})`,
       )
       .join("; ")}.`;
   }
@@ -187,7 +211,8 @@ export default function Home() {
   const stages = useMemo(() => {
     const order = new Map<string, number>();
     for (const deal of deals) {
-      if (!order.has(deal.stage)) order.set(deal.stage, order.size);
+      const stage = deal.callStage || deal.stage;
+      if (!order.has(stage)) order.set(stage, order.size);
     }
     return [...order.keys()].slice(0, 8);
   }, [deals]);
@@ -262,7 +287,7 @@ export default function Home() {
         <div className="space-y-5">
           <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
             {stages.map((stage) => {
-              const stageDeals = deals.filter((deal) => deal.stage === stage);
+              const stageDeals = deals.filter((deal) => (deal.callStage || deal.stage) === stage);
               const value = stageDeals.reduce((sum, deal) => sum + deal.value, 0);
 
               return (
@@ -310,16 +335,19 @@ export default function Home() {
               </button>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
+              <table className="w-full min-w-[1440px] border-collapse text-left text-sm">
                 <thead className="bg-[#eee9dc] text-xs uppercase tracking-[0.12em] text-[#5d5549]">
                   <tr>
                     <th className="px-4 py-3">Lead</th>
                     <th className="px-4 py-3">Owner</th>
-                    <th className="px-4 py-3">Stage</th>
+                    <th className="px-4 py-3">Qualification</th>
+                    <th className="px-4 py-3">Call Stage</th>
+                    <th className="px-4 py-3">Next Steps</th>
+                    <th className="px-4 py-3">Final verdict</th>
                     <th className="px-4 py-3">Budget</th>
                     <th className="px-4 py-3">Probability</th>
-                    <th className="px-4 py-3">Activity</th>
-                    <th className="px-4 py-3">Next step</th>
+                    <th className="px-4 py-3">Meetings</th>
+                    <th className="px-4 py-3">Last follow up</th>
                     <th className="px-4 py-3">Action</th>
                   </tr>
                 </thead>
@@ -341,22 +369,32 @@ export default function Home() {
                       </td>
                       <td className="px-4 py-3">{deal.owner}</td>
                       <td className="px-4 py-3">
-                        <Status label={deal.stage} />
+                        <Status label={deal.qualification || "Blank"} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Status label={deal.callStage || "Blank"} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Status label={deal.nextStepsStatus || "Blank"} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Status label={deal.finalVerdict || "Blank"} />
                       </td>
                       <td className="px-4 py-3">
                         <p>{deal.budget}</p>
                         <p className="text-xs text-[#756d61]">{currency.format(deal.value)}</p>
                       </td>
                       <td className="px-4 py-3">{deal.probability}%</td>
-                      <td className="px-4 py-3">
-                        <Health label={deal.health} />
-                        <p className="mt-1 text-xs text-[#756d61]">
-                          {deal.lastActivityDays < 0
-                            ? "No activity date"
-                            : `${deal.lastActivityDays} days`}
-                        </p>
+                      <td className="px-4 py-3 text-xs">
+                        <p>1st: {deal.firstMeetingDate || "None"}</p>
+                        <p>Latest: {deal.latestMeetingDate || "None"}</p>
                       </td>
-                      <td className="max-w-72 px-4 py-3">{deal.nextStep}</td>
+                      <td className="px-4 py-3">
+                        <p>{deal.lastFollowUpDate || "None"}</p>
+                        <div className="mt-1">
+                          <Health label={deal.health} />
+                        </div>
+                      </td>
                       <td className="px-4 py-3">
                         <button
                           className="h-9 border border-[#356d8f] px-3 text-xs font-semibold text-[#234e68] hover:bg-[#e6f1f6]"
