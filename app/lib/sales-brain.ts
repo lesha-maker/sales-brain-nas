@@ -22,6 +22,11 @@ const formatter = new Intl.NumberFormat("en-US", {
 
 export async function answerSalesQuestion({ question, deals, conversation = [] }: BrainAnswerInput) {
   const fallback = deterministicSalesAnswer(question, deals);
+  const directAnswer = directSpecificLeadAnswer({ question, deals, conversation });
+
+  if (directAnswer) {
+    return directAnswer;
+  }
 
   if (!process.env.OPENAI_API_KEY) {
     return `${fallback}\n\nOpenAI analysis is ready in the codebase, but OPENAI_API_KEY is not configured yet.`;
@@ -33,6 +38,43 @@ export async function answerSalesQuestion({ question, deals, conversation = [] }
     const message = error instanceof Error ? error.message : "OpenAI request failed.";
     return cleanLarkAnswer(`${fallback}\n\nOpenAI analysis was unavailable: ${message}`);
   }
+}
+
+function directSpecificLeadAnswer({
+  question,
+  deals,
+  conversation,
+}: Required<BrainAnswerInput>) {
+  const normalized = question.toLowerCase();
+  const looksLikeUpdate =
+    /\b(move|update|change|set|put)\b/.test(normalized) &&
+    /\b(stage|agreement|proposal|qualified|status)\b/.test(normalized);
+
+  if (!looksLikeUpdate) return "";
+
+  const relevantDeals = findRelevantDeals(deals, question, conversation).slice(0, 5);
+  if (!relevantDeals.length) return "";
+
+  const names = relevantDeals
+    .map((deal) => {
+      const email = deal.email ? `, ${deal.email}` : "";
+      const status = [
+        deal.callStage && deal.callStage !== "5" ? deal.callStage : "",
+        deal.nextStepsStatus && deal.nextStepsStatus !== "5" ? deal.nextStepsStatus : "",
+        deal.finalVerdict && deal.finalVerdict !== "5" ? deal.finalVerdict : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      return `${deal.account}${email}${status ? ` (${status})` : ""}`;
+    })
+    .join("; ");
+
+  if (relevantDeals.length > 1) {
+    return `I found multiple matching records: ${names}. Which one should I update?`;
+  }
+
+  return `I found ${names}. I can prepare that update, but I need you to confirm before I write to monday.`;
 }
 
 function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
@@ -94,6 +136,7 @@ async function askOpenAI({
   fallback,
 }: BrainAnswerInput & { fallback: string }) {
   const model = process.env.OPENAI_MODEL || "gpt-5.6-terra";
+  const relevantDeals = topDeals(findRelevantDeals(deals, question, conversation), 12);
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -121,7 +164,9 @@ async function askOpenAI({
                 "Use the recent conversation to understand follow-up questions. For example, if the user asks for 'the list', infer the list from the previous answer.",
                 "If the follow-up is ambiguous, make your best inference from the recent conversation and say what you assumed.",
                 "When the CRM summary includes relevantDeals, use those records first for questions about a specific company or person.",
+                "The field matchingCrmRecordsForThisQuestion is the most important source for company-specific questions.",
                 "If there are multiple matching records for the same company, say there are multiple records and distinguish them by email, stage, or status.",
+                "Never say you cannot find a record if matchingCrmRecordsForThisQuestion contains records.",
                 "If there is a data caveat, explain it simply in a sentence after the answer.",
                 "When recommending writes back to monday, phrase them as proposed actions, not completed changes.",
               ].join("\n"),
@@ -137,6 +182,7 @@ async function askOpenAI({
                 {
                   question,
                   recentConversation: conversation.slice(-8),
+                  matchingCrmRecordsForThisQuestion: relevantDeals,
                   crmSummary: buildCrmSummary(deals, question, conversation),
                   deterministicBaseline: fallback,
                 },
