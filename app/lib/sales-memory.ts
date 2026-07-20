@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile, appendFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile, appendFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { SalesDeal } from "./monday";
 import { getBoardSnapshot } from "./monday";
@@ -44,6 +44,17 @@ export type ConversationMessage = {
   role: "user" | "assistant";
   text: string;
   createdAt: string;
+};
+
+export type PendingMondayAction = {
+  id: string;
+  createdAt: string;
+  boardId: string;
+  itemId: string;
+  account: string;
+  email: string;
+  description: string;
+  columnValues: Record<string, unknown>;
 };
 
 const trackedFields: Array<keyof SalesDeal> = [
@@ -132,6 +143,33 @@ export async function appendConversationMemory({
   const tempPath = `${conversationPath(threadId)}.${process.pid}.tmp`;
   await writeFile(tempPath, JSON.stringify(trimmed, null, 2));
   await rename(tempPath, conversationPath(threadId));
+}
+
+export async function getPendingMondayAction(threadId: string) {
+  try {
+    const raw = await readFile(pendingActionPath(threadId), "utf8");
+    return JSON.parse(raw) as PendingMondayAction;
+  } catch {
+    return null;
+  }
+}
+
+export async function setPendingMondayAction(
+  threadId: string,
+  action: PendingMondayAction,
+) {
+  const dir = path.join(memoryDir(), "pending-actions");
+  await mkdir(dir, { recursive: true });
+
+  const tempPath = `${pendingActionPath(threadId)}.${process.pid}.tmp`;
+  await writeFile(tempPath, JSON.stringify(action, null, 2));
+  await rename(tempPath, pendingActionPath(threadId));
+}
+
+export async function clearPendingMondayAction(threadId: string) {
+  try {
+    await unlink(pendingActionPath(threadId));
+  } catch {}
 }
 
 async function crawlAndStore(boardId: string) {
@@ -288,6 +326,10 @@ function memoryPath(fileName: string) {
 
 function conversationPath(threadId: string) {
   return path.join(memoryDir(), "conversations", `${safeFileName(threadId)}.json`);
+}
+
+function pendingActionPath(threadId: string) {
+  return path.join(memoryDir(), "pending-actions", `${safeFileName(threadId)}.json`);
 }
 
 function safeFileName(value: string) {
