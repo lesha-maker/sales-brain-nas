@@ -120,6 +120,8 @@ async function askOpenAI({
                 "Say 'sales qualified' instead of 'Call Stage = Sales Qualified' unless the exact field name matters.",
                 "Use the recent conversation to understand follow-up questions. For example, if the user asks for 'the list', infer the list from the previous answer.",
                 "If the follow-up is ambiguous, make your best inference from the recent conversation and say what you assumed.",
+                "When the CRM summary includes relevantDeals, use those records first for questions about a specific company or person.",
+                "If there are multiple matching records for the same company, say there are multiple records and distinguish them by email, stage, or status.",
                 "If there is a data caveat, explain it simply in a sentence after the answer.",
                 "When recommending writes back to monday, phrase them as proposed actions, not completed changes.",
               ].join("\n"),
@@ -135,7 +137,7 @@ async function askOpenAI({
                 {
                   question,
                   recentConversation: conversation.slice(-8),
-                  crmSummary: buildCrmSummary(deals),
+                  crmSummary: buildCrmSummary(deals, question, conversation),
                   deterministicBaseline: fallback,
                 },
                 null,
@@ -166,7 +168,11 @@ async function askOpenAI({
   return extractResponseText(payload) || fallback;
 }
 
-function buildCrmSummary(deals: SalesDeal[]) {
+function buildCrmSummary(
+  deals: SalesDeal[],
+  question = "",
+  conversation: ConversationMessage[] = [],
+) {
   const stageSummaries = summarizeByStage(deals);
   const callStageSummaries = summarizeByColumn(deals, (deal) => deal.callStage || "Blank");
   const nextStepSummaries = summarizeByColumn(deals, (deal) => deal.nextStepsStatus || "Blank");
@@ -189,6 +195,7 @@ function buildCrmSummary(deals: SalesDeal[]) {
     deals.filter((deal) => deal.nextStepsStatus === "Proposal Done"),
     20,
   );
+  const relevantDeals = topDeals(findRelevantDeals(deals, question, conversation), 12);
   const missingOwnerCount = deals.filter((deal) => deal.owner === "Unassigned").length;
   const noBudgetCount = deals.filter((deal) => deal.budget === "Unknown").length;
   const weightedPipeline = deals.reduce(
@@ -217,7 +224,82 @@ function buildCrmSummary(deals: SalesDeal[]) {
     salesQualified,
     lateStageClosing,
     proposalDone,
+    relevantDeals,
   };
+}
+
+function findRelevantDeals(
+  deals: SalesDeal[],
+  question: string,
+  conversation: ConversationMessage[],
+) {
+  const searchText = [
+    ...conversation
+      .filter((message) => message.role === "user")
+      .slice(-4)
+      .map((message) => message.text),
+    question,
+  ].join(" ");
+  const tokens = searchTokens(searchText);
+
+  if (!tokens.length) return [];
+
+  return deals
+    .map((deal) => ({ deal, score: relevanceScore(deal, tokens) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 20)
+    .map((item) => item.deal);
+}
+
+function relevanceScore(deal: SalesDeal, tokens: string[]) {
+  const account = normalizeSearch(deal.account);
+  const email = normalizeSearch(deal.email);
+  const website = normalizeSearch(deal.website);
+  const searchable = `${account} ${email} ${website}`;
+  let score = 0;
+
+  for (const token of tokens) {
+    if (account === token) score += 100;
+    else if (account.includes(token) || token.includes(account)) score += 40;
+    else if (searchable.includes(token)) score += 12;
+  }
+
+  return score;
+}
+
+function searchTokens(text: string) {
+  const stopWords = new Set([
+    "about",
+    "agreement",
+    "called",
+    "can",
+    "crm",
+    "give",
+    "into",
+    "list",
+    "monday",
+    "stage",
+    "status",
+    "that",
+    "this",
+    "update",
+    "what",
+    "with",
+  ]);
+
+  return [
+    ...new Set(
+      text
+        .split(/[^a-zA-Z0-9@._-]+/)
+        .map((token) => normalizeSearch(token))
+        .filter((token) => token.length >= 4 && !stopWords.has(token)),
+    ),
+  ];
+}
+
+function normalizeSearch(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function summarizeByStage(deals: SalesDeal[]) {
