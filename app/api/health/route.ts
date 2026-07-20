@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { ensureSalesMemorySchedulerStarted } from "../../lib/sales-memory-scheduler";
 
 export async function GET() {
-  return NextResponse.json({ ok: true });
+  const memoryScheduler = ensureSalesMemorySchedulerStarted();
+  return NextResponse.json({ ok: true, memoryScheduler });
 }

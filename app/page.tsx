@@ -25,8 +25,17 @@ const sampleDeals: SalesDeal[] = [
     probability: 62,
     budget: "$10-100k /year",
     email: "ops@northstar.example",
+    firstName: "",
+    lastName: "",
     country: "United States",
     jobTitle: "VP Growth",
+    website: "",
+    phone: "",
+    lookingFor: "Improve logistics growth pipeline.",
+    agentNotes: "Fit lead. Procurement timeline needs confirmation.",
+    status: "",
+    followUp: "Confirm procurement timeline",
+    salesCallNotes: "",
     source: "Inbound Leads",
     mondayUrl: "https://nas-io.monday.com/boards/5029402147",
   },
@@ -51,8 +60,17 @@ const sampleDeals: SalesDeal[] = [
     probability: 78,
     budget: "$100-300k /year",
     email: "growth@helio.example",
+    firstName: "",
+    lastName: "",
     country: "Singapore",
     jobTitle: "CMO",
+    website: "",
+    phone: "",
+    lookingFor: "Scale retail campaign.",
+    agentNotes: "Fit lead. Security answers requested.",
+    status: "",
+    followUp: "Send final security answers",
+    salesCallNotes: "",
     source: "Partner",
     mondayUrl: "https://nas-io.monday.com/boards/5029402147",
   },
@@ -77,8 +95,17 @@ const sampleDeals: SalesDeal[] = [
     probability: 31,
     budget: "Less than $10k /year",
     email: "founder@tandem.example",
+    firstName: "",
+    lastName: "",
     country: "United Kingdom",
     jobTitle: "Founder",
+    website: "",
+    phone: "",
+    lookingFor: "Clinic growth consulting.",
+    agentNotes: "Review. Needs economic buyer.",
+    status: "",
+    followUp: "Book economic buyer call",
+    salesCallNotes: "",
     source: "Inbound Leads",
     mondayUrl: "https://nas-io.monday.com/boards/5029402147",
   },
@@ -99,12 +126,14 @@ const quickQuestions = [
 
 type SnapshotResponse = {
   mode: "live" | "sample";
+  source?: "memory" | "monday";
   data?: {
     board?: {
       id: string;
       name: string;
     };
     deals?: SalesDeal[];
+    generatedAt?: string;
   };
   message?: string;
   error?: string;
@@ -188,7 +217,13 @@ export default function Home() {
           setDeals(payload.data.deals);
           setBoardName(payload.data.board?.name ?? "monday sales board");
           setMode("live");
-          setStatusMessage(`Loaded ${payload.data.deals.length} live monday records.`);
+          setStatusMessage(
+            payload.source === "memory" && payload.data.generatedAt
+              ? `Loaded ${payload.data.deals.length} records from Sales Brain memory (${new Date(
+                  payload.data.generatedAt,
+                ).toLocaleString()}).`
+              : `Loaded ${payload.data.deals.length} live monday records.`,
+          );
           return;
         }
 

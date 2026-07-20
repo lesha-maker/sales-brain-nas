@@ -249,6 +249,7 @@ function topDeals(deals: SalesDeal[], limit: number) {
     .map((deal) => ({
       account: deal.account,
       owner: deal.owner,
+      email: deal.email,
       stage: deal.stage,
       qualification: deal.qualification,
       initialOutreach: deal.initialOutreach,
@@ -263,6 +264,10 @@ function topDeals(deals: SalesDeal[], limit: number) {
       probability: deal.probability,
       country: deal.country,
       jobTitle: deal.jobTitle,
+      website: deal.website,
+      lookingFor: deal.lookingFor,
+      agentNotes: deal.agentNotes,
+      salesCallNotes: deal.salesCallNotes,
       nextStep: deal.nextStep,
       mondayUrl: deal.mondayUrl,
     }));

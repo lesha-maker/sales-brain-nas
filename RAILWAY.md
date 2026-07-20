@@ -15,9 +15,42 @@ LARK_VERIFICATION_TOKEN=
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=medium
+SALES_BRAIN_CRON_SECRET=
+SALES_BRAIN_ENABLE_SCHEDULER=true
+SALES_BRAIN_MEMORY_DIR=/data/sales-brain
 ```
 
 `LARK_SALES_CHAT_ID` is only required for scheduled/manual report pushes. Lark chat replies use the incoming message id and do not require it.
+
+## Sales Brain memory
+
+Sales Brain stores the latest full monday snapshot plus crawl/change logs on disk.
+
+For Railway production, add a persistent volume and mount it at:
+
+```text
+/data
+```
+
+Then keep:
+
+```env
+SALES_BRAIN_MEMORY_DIR=/data/sales-brain
+SALES_BRAIN_ENABLE_SCHEDULER=true
+```
+
+The internal scheduler starts from the healthcheck and crawls monday every 10 minutes. You can also trigger a protected crawl manually:
+
+```text
+POST https://YOUR_RAILWAY_DOMAIN/api/memory/crawl
+Authorization: Bearer SALES_BRAIN_CRON_SECRET
+```
+
+Read the current retained memory:
+
+```text
+GET https://YOUR_RAILWAY_DOMAIN/api/memory/latest
+```
 
 ## Commands
 

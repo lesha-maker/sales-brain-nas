@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getBoardSnapshot } from "../../../lib/monday";
 import { replyToLarkMessage } from "../../../lib/lark";
 import { answerSalesQuestion } from "../../../lib/sales-brain";
+import { getLatestSalesMemory } from "../../../lib/sales-memory";
 
 type LarkEventPayload = {
   challenge?: string;
@@ -81,6 +82,12 @@ async function answerFromSalesBoard(question: string) {
 
   if (!boardId) {
     return "Sales Brain is missing MONDAY_SALES_BOARD_ID, so I cannot read the CRM yet.";
+  }
+
+  const memory = await getLatestSalesMemory();
+
+  if (memory?.deals.length) {
+    return answerSalesQuestion({ question, deals: memory.deals });
   }
 
   const { deals } = await getBoardSnapshot(boardId);

@@ -21,8 +21,17 @@ export type SalesDeal = {
   probability: number;
   budget: string;
   email: string;
+  firstName: string;
+  lastName: string;
   country: string;
   jobTitle: string;
+  website: string;
+  phone: string;
+  lookingFor: string;
+  agentNotes: string;
+  status: string;
+  followUp: string;
+  salesCallNotes: string;
   source: string;
   mondayUrl: string;
 };
@@ -239,6 +248,7 @@ const columns = {
   notes: "long_text_mm4jt916",
   status: "text_mm52m79k",
   followUp: "text_mm52trjk",
+  salesCallNotes: "text_mm57vcg1",
   added: "date_mm4tf2tz",
 };
 
@@ -287,6 +297,14 @@ function normalizeDeals(board: {
     const firstMeetingDate = valueFor(columns.firstMeeting);
     const latestMeetingDate = valueFor(columns.latestMeeting);
     const lastFollowUpDate = valueFor(columns.lastFollowUpDate);
+    const firstName = valueFor(columns.firstName);
+    const lastName = valueFor(columns.lastName);
+    const website = valueFor(columns.website);
+    const phone = valueFor(columns.phone);
+    const lookingFor = valueFor(columns.lookingFor);
+    const status = valueFor(columns.status);
+    const followUp = valueFor(columns.followUp);
+    const salesCallNotes = valueFor(columns.salesCallNotes);
     const stage =
       firstPresent([
         finalVerdict,
@@ -354,8 +372,17 @@ function normalizeDeals(board: {
       probability,
       budget: budget || "Unknown",
       email: valueFor(columns.email),
+      firstName,
+      lastName,
       country: valueFor(columns.country),
       jobTitle: valueFor(columns.jobTitle),
+      website,
+      phone,
+      lookingFor,
+      agentNotes: notes,
+      status,
+      followUp,
+      salesCallNotes,
       source: valueFor(columns.source) || item.group?.title || "Unknown",
       mondayUrl: `https://nas-io.monday.com/boards/${board.id}/pulses/${item.id}`,
     } satisfies SalesDeal;
