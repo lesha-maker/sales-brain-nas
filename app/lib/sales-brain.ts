@@ -306,8 +306,8 @@ function relevanceScore(deal: SalesDeal, tokens: string[]) {
   let score = 0;
 
   for (const token of tokens) {
-    if (account === token) score += 100;
-    else if (account.includes(token) || token.includes(account)) score += 40;
+    if (account && account === token) score += 100;
+    else if (account && (account.includes(token) || token.includes(account))) score += 40;
     else if (searchable.includes(token)) score += 12;
   }
 
@@ -325,6 +325,7 @@ function searchTokens(text: string) {
     "into",
     "list",
     "monday",
+    "move",
     "stage",
     "status",
     "that",
