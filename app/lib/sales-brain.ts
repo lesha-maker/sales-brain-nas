@@ -1,8 +1,10 @@
 import type { SalesDeal } from "./monday";
+import type { ConversationMessage } from "./sales-memory";
 
 type BrainAnswerInput = {
   question: string;
   deals: SalesDeal[];
+  conversation?: ConversationMessage[];
 };
 
 type StageSummary = {
@@ -18,7 +20,7 @@ const formatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 
-export async function answerSalesQuestion({ question, deals }: BrainAnswerInput) {
+export async function answerSalesQuestion({ question, deals, conversation = [] }: BrainAnswerInput) {
   const fallback = deterministicSalesAnswer(question, deals);
 
   if (!process.env.OPENAI_API_KEY) {
@@ -26,7 +28,7 @@ export async function answerSalesQuestion({ question, deals }: BrainAnswerInput)
   }
 
   try {
-    return cleanLarkAnswer(await askOpenAI({ question, deals, fallback }));
+    return cleanLarkAnswer(await askOpenAI({ question, deals, conversation, fallback }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "OpenAI request failed.";
     return cleanLarkAnswer(`${fallback}\n\nOpenAI analysis was unavailable: ${message}`);
@@ -88,6 +90,7 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
 async function askOpenAI({
   question,
   deals,
+  conversation = [],
   fallback,
 }: BrainAnswerInput & { fallback: string }) {
   const model = process.env.OPENAI_MODEL || "gpt-5.6-terra";
@@ -115,6 +118,8 @@ async function askOpenAI({
                 "Keep Lark replies short and human. Prefer 1-3 plain sentences for simple questions.",
                 "Do not use markdown formatting, bold text, code ticks, bullet points, or CRM jargon unless the user asks for a detailed report.",
                 "Say 'sales qualified' instead of 'Call Stage = Sales Qualified' unless the exact field name matters.",
+                "Use the recent conversation to understand follow-up questions. For example, if the user asks for 'the list', infer the list from the previous answer.",
+                "If the follow-up is ambiguous, make your best inference from the recent conversation and say what you assumed.",
                 "If there is a data caveat, explain it simply in a sentence after the answer.",
                 "When recommending writes back to monday, phrase them as proposed actions, not completed changes.",
               ].join("\n"),
@@ -129,6 +134,7 @@ async function askOpenAI({
               text: JSON.stringify(
                 {
                   question,
+                  recentConversation: conversation.slice(-8),
                   crmSummary: buildCrmSummary(deals),
                   deterministicBaseline: fallback,
                 },
@@ -169,6 +175,20 @@ function buildCrmSummary(deals: SalesDeal[]) {
   const topFit = topDeals(deals.filter((deal) => deal.qualification === "Fit"), 12);
   const topReview = topDeals(deals.filter((deal) => deal.qualification === "Review"), 12);
   const topNotFit = topDeals(deals.filter((deal) => deal.qualification === "Not Fit"), 8);
+  const salesQualified = topDeals(
+    deals.filter((deal) => deal.callStage === "Sales Qualified"),
+    20,
+  );
+  const lateStageClosing = topDeals(
+    deals.filter((deal) =>
+      ["2nd call with Nuseir", "Confirmed (Verbal)", "Completed"].includes(deal.finalVerdict),
+    ),
+    20,
+  );
+  const proposalDone = topDeals(
+    deals.filter((deal) => deal.nextStepsStatus === "Proposal Done"),
+    20,
+  );
   const missingOwnerCount = deals.filter((deal) => deal.owner === "Unassigned").length;
   const noBudgetCount = deals.filter((deal) => deal.budget === "Unknown").length;
   const weightedPipeline = deals.reduce(
@@ -194,6 +214,9 @@ function buildCrmSummary(deals: SalesDeal[]) {
     topFit,
     topReview,
     topNotFit,
+    salesQualified,
+    lateStageClosing,
+    proposalDone,
   };
 }
 

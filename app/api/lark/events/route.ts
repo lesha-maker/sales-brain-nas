@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getBoardSnapshot } from "../../../lib/monday";
 import { replyToLarkMessage } from "../../../lib/lark";
 import { answerSalesQuestion } from "../../../lib/sales-brain";
-import { getLatestSalesMemory } from "../../../lib/sales-memory";
+import {
+  appendConversationMemory,
+  getConversationMemory,
+  getLatestSalesMemory,
+} from "../../../lib/sales-memory";
 
 type LarkEventPayload = {
   challenge?: string;
@@ -15,6 +19,9 @@ type LarkEventPayload = {
   event?: {
     message?: {
       message_id?: string;
+      root_id?: string;
+      parent_id?: string;
+      chat_id?: string;
       message_type?: string;
       content?: string;
       chat_type?: string;
@@ -56,11 +63,19 @@ export async function POST(request: NextRequest) {
   }
 
   const question = parseTextContent(message.content);
-  const answer = await answerFromSalesBoard(question);
+  const threadId = conversationThreadId(message);
+  const conversation = await getConversationMemory(threadId);
+  const answer = await answerFromSalesBoard(question, conversation);
 
   await replyToLarkMessage({
     messageId,
     text: answer,
+  });
+
+  await appendConversationMemory({
+    threadId,
+    userMessage: question,
+    assistantMessage: answer,
   });
 
   return NextResponse.json({ ok: true });
@@ -77,7 +92,20 @@ function parseTextContent(content?: string) {
   }
 }
 
-async function answerFromSalesBoard(question: string) {
+function conversationThreadId(message: NonNullable<LarkEventPayload["event"]>["message"]) {
+  return (
+    message?.root_id ||
+    message?.parent_id ||
+    message?.chat_id ||
+    message?.message_id ||
+    "lark-default-thread"
+  );
+}
+
+async function answerFromSalesBoard(
+  question: string,
+  conversation: Awaited<ReturnType<typeof getConversationMemory>>,
+) {
   const boardId = process.env.MONDAY_SALES_BOARD_ID;
 
   if (!boardId) {
@@ -87,9 +115,9 @@ async function answerFromSalesBoard(question: string) {
   const memory = await getLatestSalesMemory();
 
   if (memory?.deals.length) {
-    return answerSalesQuestion({ question, deals: memory.deals });
+    return answerSalesQuestion({ question, deals: memory.deals, conversation });
   }
 
   const { deals } = await getBoardSnapshot(boardId);
-  return answerSalesQuestion({ question, deals });
+  return answerSalesQuestion({ question, deals, conversation });
 }

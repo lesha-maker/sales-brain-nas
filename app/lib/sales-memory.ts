@@ -40,6 +40,12 @@ export type SalesMemoryChange = {
   after?: string;
 };
 
+export type ConversationMessage = {
+  role: "user" | "assistant";
+  text: string;
+  createdAt: string;
+};
+
 const trackedFields: Array<keyof SalesDeal> = [
   "owner",
   "email",
@@ -90,6 +96,42 @@ export async function getRecentSalesMemoryChanges(limit = 100) {
   } catch {
     return [];
   }
+}
+
+export async function getConversationMemory(threadId: string) {
+  try {
+    const raw = await readFile(conversationPath(threadId), "utf8");
+    const messages = JSON.parse(raw) as ConversationMessage[];
+    return messages.slice(-12);
+  } catch {
+    return [];
+  }
+}
+
+export async function appendConversationMemory({
+  threadId,
+  userMessage,
+  assistantMessage,
+}: {
+  threadId: string;
+  userMessage: string;
+  assistantMessage: string;
+}) {
+  const dir = path.join(memoryDir(), "conversations");
+  await mkdir(dir, { recursive: true });
+
+  const existing = await getConversationMemory(threadId);
+  const now = new Date().toISOString();
+  const messages = [
+    ...existing,
+    { role: "user", text: userMessage, createdAt: now },
+    { role: "assistant", text: assistantMessage, createdAt: now },
+  ] satisfies ConversationMessage[];
+
+  const trimmed = messages.slice(-20);
+  const tempPath = `${conversationPath(threadId)}.${process.pid}.tmp`;
+  await writeFile(tempPath, JSON.stringify(trimmed, null, 2));
+  await rename(tempPath, conversationPath(threadId));
 }
 
 async function crawlAndStore(boardId: string) {
@@ -242,6 +284,14 @@ function stringifyDealValue(value: unknown) {
 
 function memoryPath(fileName: string) {
   return path.join(memoryDir(), fileName);
+}
+
+function conversationPath(threadId: string) {
+  return path.join(memoryDir(), "conversations", `${safeFileName(threadId)}.json`);
+}
+
+function safeFileName(value: string) {
+  return value.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
 }
 
 function memoryDir() {
