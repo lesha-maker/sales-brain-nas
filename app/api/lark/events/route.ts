@@ -26,7 +26,14 @@ export async function POST(request: NextRequest) {
   const expectedToken = process.env.LARK_VERIFICATION_TOKEN;
   const receivedToken = payload.token || payload.header?.token;
 
-  if (expectedToken && receivedToken !== expectedToken) {
+  if (!expectedToken) {
+    return NextResponse.json(
+      { error: "LARK_VERIFICATION_TOKEN is not configured." },
+      { status: 500 },
+    );
+  }
+
+  if (receivedToken !== expectedToken) {
     return NextResponse.json({ error: "Invalid Lark verification token." }, { status: 401 });
   }
 
