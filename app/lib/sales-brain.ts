@@ -26,10 +26,10 @@ export async function answerSalesQuestion({ question, deals }: BrainAnswerInput)
   }
 
   try {
-    return await askOpenAI({ question, deals, fallback });
+    return cleanLarkAnswer(await askOpenAI({ question, deals, fallback }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "OpenAI request failed.";
-    return `${fallback}\n\nOpenAI analysis was unavailable: ${message}`;
+    return cleanLarkAnswer(`${fallback}\n\nOpenAI analysis was unavailable: ${message}`);
   }
 }
 
@@ -60,7 +60,7 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
   }
 
   if (normalized.includes("sales qualified")) {
-    return `There are ${salesQualified.length} leads in Call Stage = Sales Qualified.`;
+    return `We have ${salesQualified.length} sales qualified leads right now.`;
   }
 
   if (normalized.includes("fit") || normalized.includes("qualified")) {
@@ -110,9 +110,12 @@ async function askOpenAI({
               type: "input_text",
               text: [
                 "You are Sales Brain, an analytical sales operations agent for Nas Daily.",
-                "Answer questions about the monday.com CRM with concrete numbers, risks, and next actions.",
+                "Answer questions about the monday.com CRM with concrete numbers in normal, conversational English.",
                 "Use only the supplied CRM summary. Do not invent records, amounts, owners, or statuses.",
-                "Keep Lark replies concise: 3-7 bullets unless the user asks for detail.",
+                "Keep Lark replies short and human. Prefer 1-3 plain sentences for simple questions.",
+                "Do not use markdown formatting, bold text, code ticks, bullet points, or CRM jargon unless the user asks for a detailed report.",
+                "Say 'sales qualified' instead of 'Call Stage = Sales Qualified' unless the exact field name matters.",
+                "If there is a data caveat, explain it simply in a sentence after the answer.",
                 "When recommending writes back to monday, phrase them as proposed actions, not completed changes.",
               ].join("\n"),
             },
@@ -305,5 +308,14 @@ function extractResponseText(payload: {
     .map((content) => content.text)
     .filter(Boolean)
     .join("\n")
+    .trim();
+}
+
+function cleanLarkAnswer(answer: string) {
+  return answer
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
