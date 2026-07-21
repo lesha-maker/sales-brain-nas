@@ -21,21 +21,31 @@ export function buildCeoSalesReport({
   const completed = deals.filter((deal) => deal.finalVerdict === "Completed");
   const agreementStage = deals.filter((deal) => deal.finalVerdict === "Agreement Stage");
   const highProbability = highProbabilityDeals(deals);
+  const worthSecondCall = worthSecondCallDeals(deals);
   const upcomingCalls = upcomingBookedMeetings(deals);
   const weekAgreementMoves = changesThisWeek(recentChanges).filter(
     (change) => change.field === "finalVerdict" && change.after === "Agreement Stage",
   );
-  const notableConversations = notableConversationDeals(deals);
+  const existingLeadUpdates = buildExistingLeadUpdates(deals);
+  const newLeadUpdates = buildNewLeadUpdates(deals);
   const paragraphs = [
-    title,
+    reportTitleDate(),
+    "Overall Funnel",
+    formatFunnelBoard({
+      signed: completed,
+      agreementStage,
+      hot: highProbability,
+      worthSecondCall,
+    }),
+    "Updates On Existing Leads Since We Last Met",
+    ...existingLeadUpdates,
+    "New Leads That Showed Interest",
+    ...newLeadUpdates,
+    "Quick Stats",
     `As of ${reportDate}: ${snapshot.summary.totalRecords.toLocaleString()} CRM records, ${countWhere(
       deals,
       (deal) => deal.callStage === "Sales Qualified",
     )} sales qualified, ${agreementStage.length} in agreement stage, ${completed.length} completed, ${upcomingCalls.length} upcoming calls.`,
-    "First Fold: Closed / Agreement / High Probability",
-    ...formatBucket("Completed", completed, 4),
-    ...formatBucket("Agreement Stage", agreementStage, 5),
-    ...formatBucket("High Probability Of Closing", highProbability, 6),
     "Key Points To Note",
     `This week, ${weekAgreementMoves.length} clients moved into Agreement Stage: ${listNames(
       weekAgreementMoves.map((change) => change.account),
@@ -52,8 +62,6 @@ export function buildCeoSalesReport({
     segmentLine("Inbound", inbound),
     "Outbound Snapshot",
     segmentLine("Outbound", outbound),
-    "Noteworthy Conversations",
-    ...notableConversations.slice(0, 6).map(formatDeal),
     "CEO Actions",
     "1. Review Agreement Stage and high-probability records today.",
     "2. Assign owners to every unassigned active record.",
@@ -68,29 +76,42 @@ export function buildCeoSalesReport({
   };
 }
 
-function formatBucket(bucket: string, deals: SalesDeal[], limit: number) {
-  if (!deals.length) {
-    return [`${bucket}: none`];
-  }
-
-  return [
-    `${bucket}:`,
-    ...deals.slice(0, limit).map(formatDeal),
-  ];
+function reportTitleDate() {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Singapore",
+    day: "numeric",
+    month: "long",
+  }).format(new Date());
 }
 
-function formatDeal(deal: SalesDeal) {
-  const parts = [
-    deal.account,
-    stageFor(deal),
-    `owner: ${cleanOwner(deal.owner)}`,
-    `source: ${sourceFor(deal)}`,
-    deal.firstMeetingDate ? `meeting: ${deal.firstMeetingDate}` : "",
-    cleanValue(deal.budget) ? `budget: ${cleanValue(deal.budget)}` : "",
-    deal.email ? `contact: ${deal.email}` : "",
-  ].filter(Boolean);
+function formatFunnelBoard({
+  signed,
+  agreementStage,
+  hot,
+  worthSecondCall,
+}: {
+  signed: SalesDeal[];
+  agreementStage: SalesDeal[];
+  hot: SalesDeal[];
+  worthSecondCall: SalesDeal[];
+}) {
+  const columns = [
+    ["Signed", signed.map(shortDealName).slice(0, 10)],
+    ["Agreement stage", agreementStage.map(shortDealName).slice(0, 10)],
+    ["Hot", hot.map(shortDealName).slice(0, 10)],
+    ["Worth a second call", worthSecondCall.map(shortDealName).slice(0, 10)],
+  ] as const;
+  const maxRows = Math.max(...columns.map(([, rows]) => rows.length), 1);
+  const widths = [28, 28, 28, 28];
+  const header = columns.map(([label], index) => pad(label, widths[index])).join(" | ");
+  const divider = widths.map((width) => "-".repeat(width)).join("-+-");
+  const rows = Array.from({ length: maxRows }, (_, rowIndex) =>
+    columns
+      .map(([, values], columnIndex) => pad(values[rowIndex] || "", widths[columnIndex]))
+      .join(" | "),
+  );
 
-  return parts.join(" | ");
+  return [header, divider, ...rows].join("\n");
 }
 
 function segmentLine(segment: string, deals: SalesDeal[]) {
@@ -129,6 +150,73 @@ function highProbabilityDeals(deals: SalesDeal[]) {
   );
 }
 
+function worthSecondCallDeals(deals: SalesDeal[]) {
+  return topActiveDeals(
+    deals.filter((deal) => {
+      if (["Completed", "Agreement Stage", "Lost", "Gone Cold"].includes(deal.finalVerdict)) {
+        return false;
+      }
+
+      return (
+        deal.finalVerdict === "2nd call with Nuseir" ||
+        deal.callStage === "Booked a Meeting" ||
+        deal.nextStepsStatus === "Proposal Stage"
+      );
+    }),
+    12,
+  );
+}
+
+function buildExistingLeadUpdates(deals: SalesDeal[]) {
+  return [
+    "- Dolce Estetica Clinic (Medlounges): should be signed today.",
+    "- DS18: counter proposed $10k. Alex meeting today.",
+    "- AltitudeX: following up; checking if they have more questions we can tackle.",
+    "- Mycospring: still travelling; coming back with questions.",
+    "- Babysense: followed up again.",
+    "- DW Group: pricing submitted, waiting for feedback.",
+    "- KIPP: currently evaluating. Lesha sent email.",
+    "- Flexar: follow up on Monday.",
+    "- Zumba: follow up sent.",
+    "- PSB Academy: delayed.",
+    "- Modernizing Trends: open to monthly, but no implementation fee.",
+  ].map((line) => enrichWithCrmStage(line, deals));
+}
+
+function buildNewLeadUpdates(deals: SalesDeal[]) {
+  return [
+    "- MovingLife: overall rating 9.6/10; Tier 1 enterprise opportunity. They spend $200k/month on digital. Revenue signal: $25M.",
+    "- Gennoma Lab (outbound US): Alan is Head of Digital Marketing. They spend millions in digital marketing and built internal agents, but results are not effective. Circling internally because there is some AI champion politics.",
+    "- Lets Beco Shop: approx $100k/month digital spend, about $1.2M annually. Business is roughly $400M/year.",
+    "- USEA Global: B2B company. Needs qualification on use case and budget.",
+    "- Airwallex USA: proposing partnership with Head of Startups around content and SMB intros. Follow-up call today.",
+    "- Miami Dinner: most interested leads are Subway, Gainswave, and Home Improvement. Home Improvement spends around $70k/month and is very AI interested.",
+    "- Singapore Dinner: Chimichanga, Rently, Sodexo, Airwallex, Crocs, ViViai, XVA, DHL.",
+  ].map((line) => enrichWithCrmStage(line, deals));
+}
+
+function enrichWithCrmStage(line: string, deals: SalesDeal[]) {
+  const deal = deals.find((candidate) => {
+    const haystack = line.toLowerCase();
+    return (
+      haystack.includes(candidate.account.toLowerCase()) ||
+      candidate.account
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((part) => part.length >= 5)
+        .some((part) => haystack.includes(part))
+    );
+  });
+
+  if (!deal) return line;
+
+  const stage = stageFor(deal);
+  const owner = cleanOwner(deal.owner);
+  const crmParts = [stage ? `stage: ${stage}` : "", owner ? `owner: ${owner}` : ""].filter(Boolean);
+
+  return crmParts.length ? `${line} (${crmParts.join(", ")})` : line;
+}
+
 function topActiveDeals(deals: SalesDeal[], limit: number) {
   return [...deals]
     .filter((deal) =>
@@ -148,20 +236,6 @@ function topActiveDeals(deals: SalesDeal[], limit: number) {
       return b.value * b.probability - a.value * a.probability;
     })
     .slice(0, limit);
-}
-
-function notableConversationDeals(deals: SalesDeal[]) {
-  const notableNames = ["Ironasylum", "LetsBeco", "Medlounges", "DS18", "Flexar"];
-  const named = deals.filter((deal) =>
-    notableNames.some((name) => deal.account.toLowerCase().includes(name.toLowerCase())),
-  );
-  const recentHighBudget = deals.filter(
-    (deal) =>
-      ["$300k-1m /year", "$1m+ /year", "$1m+ / year"].includes(deal.budget) &&
-      ["Fit", "Review", "5"].includes(deal.qualification),
-  );
-
-  return uniqueDeals([...named, ...topActiveDeals(recentHighBudget, 10)]).slice(0, 16);
 }
 
 function scoreDeal(deal: SalesDeal) {
@@ -210,13 +284,9 @@ function firstDeal(deals: SalesDeal[], account: string) {
   return deals.find((deal) => deal.account.toLowerCase().includes(account.toLowerCase()));
 }
 
-function uniqueDeals(deals: SalesDeal[]) {
-  const seen = new Set<string>();
-  return deals.filter((deal) => {
-    if (seen.has(deal.id)) return false;
-    seen.add(deal.id);
-    return true;
-  });
+function shortDealName(deal: SalesDeal) {
+  const meeting = deal.firstMeetingDate ? ` (${dateLabel(deal.firstMeetingDate)})` : "";
+  return `${deal.account}${meeting}`;
 }
 
 function stageFor(deal: SalesDeal) {
@@ -225,21 +295,34 @@ function stageFor(deal: SalesDeal) {
     .join(" / ");
 }
 
-function sourceFor(deal: SalesDeal) {
-  return deal.source && deal.source !== "5" ? deal.source : "Unknown";
-}
-
 function cleanOwner(owner: string) {
   return owner && owner !== "Unassigned" ? owner : "Unassigned";
-}
-
-function cleanValue(value: string) {
-  return value && value !== "Unknown" ? value : "";
 }
 
 function listNames(names: string[]) {
   if (!names.length) return "none";
   return [...new Set(names)].join(", ");
+}
+
+function pad(value: string, width: number) {
+  const clean = value.replace(/\s+/g, " ").trim();
+  const shortened = clean.length > width - 1 ? `${clean.slice(0, width - 2)}.` : clean;
+  return shortened.padEnd(width, " ");
+}
+
+function dateLabel(value: string) {
+  const match = value.match(/\d{4}-(\d{2})-(\d{2})/);
+  if (!match) return value;
+
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const year = Number(todayInSingapore().slice(0, 4));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+  }).format(date);
 }
 
 function isOutbound(deal: SalesDeal) {
