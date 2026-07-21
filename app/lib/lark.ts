@@ -1,5 +1,11 @@
 const LARK_BASE_URL = "https://open.larksuite.com/open-apis";
 
+type LarkApiPayload<T> = {
+  code: number;
+  msg: string;
+  data?: T;
+};
+
 async function getTenantAccessToken() {
   const appId = process.env.LARK_APP_ID;
   const appSecret = process.env.LARK_APP_SECRET;
@@ -65,6 +71,72 @@ export async function sendLarkTextReport({
   return payload;
 }
 
+export async function createLarkDocument({ title }: { title: string }) {
+  const payload = await larkRequest<{
+    document?: {
+      document_id: string;
+      revision_id?: number;
+      title?: string;
+      url?: string;
+    };
+  }>("/docx/v1/documents", {
+    method: "POST",
+    body: JSON.stringify({ title }),
+  });
+
+  const document = payload.document;
+
+  if (!document?.document_id) {
+    throw new Error("Lark created no document_id.");
+  }
+
+  return {
+    documentId: document.document_id,
+    revisionId: document.revision_id,
+    title: document.title || title,
+    url: document.url || larkDocumentUrl(document.document_id),
+  };
+}
+
+export async function appendLarkDocumentTextBlocks({
+  documentId,
+  paragraphs,
+}: {
+  documentId: string;
+  paragraphs: string[];
+}) {
+  const chunks = chunk(paragraphs.filter(Boolean), 40);
+  let index = 0;
+
+  for (const paragraphsChunk of chunks) {
+    await larkRequest(
+      `/docx/v1/documents/${documentId}/blocks/${documentId}/children`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          index,
+          children: paragraphsChunk.map((paragraph) => ({
+            block_type: 2,
+            text: {
+              elements: [
+                {
+                  text_run: {
+                    content: paragraph,
+                    text_element_style: {},
+                  },
+                },
+              ],
+              style: {},
+            },
+          })),
+        }),
+      },
+    );
+
+    index += paragraphsChunk.length;
+  }
+}
+
 export async function replyToLarkMessage({
   messageId,
   text,
@@ -93,4 +165,42 @@ export async function replyToLarkMessage({
   }
 
   return payload;
+}
+
+async function larkRequest<T>(
+  path: string,
+  init: RequestInit = {},
+) {
+  const token = await getTenantAccessToken();
+  const response = await fetch(`${LARK_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8",
+      ...init.headers,
+    },
+  });
+
+  const payload = (await response.json()) as LarkApiPayload<T>;
+
+  if (!response.ok || payload.code !== 0) {
+    throw new Error(payload.msg || `Lark API request failed: ${path}`);
+  }
+
+  return payload.data as T;
+}
+
+function larkDocumentUrl(documentId: string) {
+  const baseUrl = process.env.LARK_DOCS_BASE_URL?.replace(/\/$/, "");
+  return baseUrl ? `${baseUrl}/docx/${documentId}` : `https://www.larksuite.com/docx/${documentId}`;
+}
+
+function chunk<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+
+  return chunks;
 }
