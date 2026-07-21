@@ -102,6 +102,55 @@ export async function createLarkDocument({ title }: { title: string }) {
   };
 }
 
+export async function createLarkSpreadsheet({ title }: { title: string }) {
+  const payload = await larkRequest<{
+    spreadsheet?: {
+      title?: string;
+      url?: string;
+      spreadsheet_token?: string;
+    };
+  }>("/sheets/v3/spreadsheets", {
+    method: "POST",
+    body: JSON.stringify({ title }),
+  });
+
+  const spreadsheet = payload.spreadsheet;
+
+  if (!spreadsheet?.spreadsheet_token) {
+    throw new Error("Lark created no spreadsheet_token.");
+  }
+
+  return {
+    spreadsheetToken: spreadsheet.spreadsheet_token,
+    title: spreadsheet.title || title,
+    url: spreadsheet.url || larkSpreadsheetUrl(spreadsheet.spreadsheet_token),
+  };
+}
+
+export async function writeLarkSpreadsheetValues({
+  spreadsheetToken,
+  values,
+}: {
+  spreadsheetToken: string;
+  values: string[][];
+}) {
+  const sheetId = await getFirstSheetId(spreadsheetToken);
+  const columnCount = Math.max(...values.map((row) => row.length), 1);
+  const range = `${sheetId}!A1:${columnName(columnCount)}${values.length}`;
+
+  await larkRequest(`/sheets/v2/spreadsheets/${spreadsheetToken}/values_batch_update`, {
+    method: "POST",
+    body: JSON.stringify({
+      valueRanges: [
+        {
+          range,
+          values,
+        },
+      ],
+    }),
+  });
+}
+
 export async function appendLarkDocumentTextBlocks({
   documentId,
   paragraphs,
@@ -354,6 +403,41 @@ async function larkRequest<T>(
 function larkDocumentUrl(documentId: string) {
   const baseUrl = process.env.LARK_DOCS_BASE_URL?.replace(/\/$/, "");
   return baseUrl ? `${baseUrl}/docx/${documentId}` : `https://www.larksuite.com/docx/${documentId}`;
+}
+
+function larkSpreadsheetUrl(spreadsheetToken: string) {
+  const baseUrl = process.env.LARK_DOCS_BASE_URL?.replace(/\/$/, "");
+  return baseUrl
+    ? `${baseUrl}/sheets/${spreadsheetToken}`
+    : `https://www.larksuite.com/sheets/${spreadsheetToken}`;
+}
+
+async function getFirstSheetId(spreadsheetToken: string) {
+  const payload = await larkRequest<{
+    sheets?: Array<{ sheetId?: string; sheet_id?: string }>;
+  }>(`/sheets/v2/spreadsheets/${spreadsheetToken}/metainfo`);
+
+  const firstSheet = payload.sheets?.[0];
+  const sheetId = firstSheet?.sheetId || firstSheet?.sheet_id;
+
+  if (!sheetId) {
+    throw new Error("Lark spreadsheet returned no sheet id.");
+  }
+
+  return sheetId;
+}
+
+function columnName(columnNumber: number) {
+  let name = "";
+  let current = columnNumber;
+
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    current = Math.floor((current - 1) / 26);
+  }
+
+  return name;
 }
 
 function chunk<T>(items: T[], size: number) {

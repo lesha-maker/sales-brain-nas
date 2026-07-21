@@ -87,6 +87,7 @@ export function buildCeoSalesReport({
   return {
     title,
     blocks,
+    sheetValues: blocksToSheetValues(blocks),
     paragraphs: blocks.flatMap((block) =>
       block.type === "paragraph" ? [block.text] : [block.rows.map((row) => row.join(" | ")).join("\n")],
     ),
@@ -96,6 +97,23 @@ export function buildCeoSalesReport({
       )
       .join("\n\n"),
   };
+}
+
+function blocksToSheetValues(blocks: LarkDocumentContentBlock[]) {
+  const values: string[][] = [];
+
+  for (const block of blocks) {
+    if (block.type === "paragraph") {
+      values.push([block.text]);
+      values.push([]);
+      continue;
+    }
+
+    values.push(...block.rows);
+    values.push([]);
+  }
+
+  return values;
 }
 
 function firstFoldRows({

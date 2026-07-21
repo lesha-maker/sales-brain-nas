@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  appendLarkDocumentBlocks,
-  createLarkDocument,
+  createLarkSpreadsheet,
   sendLarkTextReport,
+  writeLarkSpreadsheetValues,
 } from "../../../lib/lark";
 import { buildCeoSalesReport } from "../../../lib/ceo-report";
 import { getLatestSalesMemory, getRecentSalesMemoryChanges } from "../../../lib/sales-memory";
@@ -26,11 +26,11 @@ export async function POST(request: NextRequest) {
   try {
     const recentChanges = await getRecentSalesMemoryChanges(100);
     const report = buildCeoSalesReport({ snapshot, recentChanges });
-    const document = await createLarkDocument({ title: report.title });
+    const spreadsheet = await createLarkSpreadsheet({ title: report.title });
 
-    await appendLarkDocumentBlocks({
-      documentId: document.documentId,
-      blocks: report.blocks,
+    await writeLarkSpreadsheetValues({
+      spreadsheetToken: spreadsheet.spreadsheetToken,
+      values: report.sheetValues,
     });
 
     const chatId = body.chatId || process.env.LARK_SALES_CHAT_ID;
@@ -38,13 +38,13 @@ export async function POST(request: NextRequest) {
     if (body.sendToChat !== false && chatId) {
       await sendLarkTextReport({
         chatId,
-        text: `I created the CEO Sales Report in Lark Docs: ${document.url}`,
+        text: `I created the CEO Sales Snapshot in Lark: ${spreadsheet.url}`,
       });
     }
 
     return NextResponse.json({
       ok: true,
-      document,
+      spreadsheet,
       reportPreview: report.plainText.slice(0, 2000),
     });
   } catch (error) {
