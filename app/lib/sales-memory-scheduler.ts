@@ -19,7 +19,7 @@ export function ensureSalesMemorySchedulerStarted() {
   if (globalThis.salesBrainMemoryScheduler) {
     return {
       enabled: true,
-      started: false,
+      started: true,
       startedAt: globalThis.salesBrainMemoryScheduler.startedAt,
     };
   }
