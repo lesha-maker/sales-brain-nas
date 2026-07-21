@@ -194,7 +194,6 @@ export async function appendLarkDocumentBlocks({
 async function appendLarkTable({
   documentId,
   rows,
-  columnWidths,
   index,
 }: {
   documentId: string;
@@ -225,8 +224,6 @@ async function appendLarkTable({
             property: {
               row_size: rowSize,
               column_size: columnSize,
-              header_row: true,
-              ...(columnWidths?.length === columnSize ? { column_width: columnWidths } : {}),
             },
           },
         },
