@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  appendLarkReportBlocks,
   appendLarkDocumentTextBlocks,
   createLarkDocument,
   sendLarkTextReport,
@@ -28,10 +29,17 @@ export async function POST(request: NextRequest) {
     const report = buildCeoSalesReport({ snapshot, recentChanges });
     const document = await createLarkDocument({ title: report.title });
 
-    await appendLarkDocumentTextBlocks({
-      documentId: document.documentId,
-      paragraphs: report.paragraphs,
-    });
+    try {
+      await appendLarkReportBlocks({
+        documentId: document.documentId,
+        blocks: report.blocks,
+      });
+    } catch {
+      await appendLarkDocumentTextBlocks({
+        documentId: document.documentId,
+        paragraphs: report.paragraphs,
+      });
+    }
 
     const chatId = body.chatId || process.env.LARK_SALES_CHAT_ID;
 

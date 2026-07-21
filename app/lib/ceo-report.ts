@@ -1,5 +1,6 @@
 import type { SalesDeal } from "./monday";
 import type { SalesMemoryChange, SalesMemorySnapshot } from "./sales-memory";
+import type { LarkReportBlock } from "./lark";
 
 export function buildCeoSalesReport({
   snapshot,
@@ -28,47 +29,93 @@ export function buildCeoSalesReport({
   const inbound = deals.filter((deal) => !isOutbound(deal));
   const outbound = deals.filter(isOutbound);
   const newSignals = newLeadSignals(deals, recentChanges).slice(0, 5);
+  const bottomLine = `Bottom line: ${agreement.length} deals are in agreement stage, ${hot.length} are hot, and ${upcomingCalls.length} booked calls are coming up. The main execution risk is ownership: ${activeUnassigned.length} active records are still unassigned.`;
+  const movedToAgreement = `Moved to agreement: ${movement.agreementMoves.length ? listNames(movement.agreementMoves) : "none"}.`;
+  const newAndNegative = `New records added: ${movement.createdCount}. Losses/no-shows: ${movement.negativeCount}.`;
+  const importantChanges = movement.important.length
+    ? `Important changes: ${movement.important.slice(0, 4).map(formatChange).join("; ")}.`
+    : "Important changes: no major stage movement outside the closing list.";
+  const inboundShape = `Inbound: ${inbound.length.toLocaleString()} records, ${countWhere(
+    inbound,
+    (deal) => deal.callStage === "Sales Qualified",
+  )} sales qualified, ${countWhere(inbound, (deal) => deal.callStage === "Booked a Meeting")} booked calls.`;
+  const outboundShape = `Outbound: ${outbound.length.toLocaleString()} records, ${countWhere(
+    outbound,
+    (deal) => deal.callStage === "Sales Qualified",
+  )} sales qualified, ${countWhere(outbound, (deal) => deal.callStage === "Booked a Meeting")} booked calls.`;
+  const closeLines = dealLines([...agreement, ...hot].slice(0, 8));
+  const newSignalLines = newSignals.length
+    ? dealLines(newSignals)
+    : ["No new high-signal leads found in the latest CRM changes."];
 
   const paragraphs = [
     reportDate(),
     "CEO Sales Brief",
-    `Bottom line: ${agreement.length} deals are in agreement stage, ${hot.length} are hot, and ${upcomingCalls.length} booked calls are coming up. The main execution risk is ownership: ${activeUnassigned.length} active records are still unassigned.`,
+    bottomLine,
     "What Can Close",
-    ...dealLines([...agreement, ...hot].slice(0, 8)),
+    ...closeLines,
     "Movement Since Last Report",
-    `Moved to agreement: ${movement.agreementMoves.length ? listNames(movement.agreementMoves) : "none"}.`,
-    `New records added: ${movement.createdCount}. Losses/no-shows: ${movement.negativeCount}.`,
-    movement.important.length
-      ? `Important changes: ${movement.important.slice(0, 4).map(formatChange).join("; ")}.`
-      : "Important changes: no major stage movement outside the closing list.",
+    movedToAgreement,
+    newAndNegative,
+    importantChanges,
     "Lead Board",
     boardLine("Signed", signed),
     boardLine("Agreement Stage", agreement),
     boardLine("Hot", hot),
     boardLine("Worth Watching", watch),
     "New Leads Worth CEO Attention",
-    ...(newSignals.length ? dealLines(newSignals) : ["No new high-signal leads found in the latest CRM changes."]),
+    ...newSignalLines,
     "Pipeline Shape",
-    `Inbound: ${inbound.length.toLocaleString()} records, ${countWhere(
-      inbound,
-      (deal) => deal.callStage === "Sales Qualified",
-    )} sales qualified, ${countWhere(inbound, (deal) => deal.callStage === "Booked a Meeting")} booked calls.`,
-    `Outbound: ${outbound.length.toLocaleString()} records, ${countWhere(
-      outbound,
-      (deal) => deal.callStage === "Sales Qualified",
-    )} sales qualified, ${countWhere(outbound, (deal) => deal.callStage === "Booked a Meeting")} booked calls.`,
+    inboundShape,
+    outboundShape,
     "CEO Decisions Needed",
     "1. Who owns the unassigned active opportunities?",
     "2. Which agreement-stage deal needs leadership help to close this week?",
     "3. Which hot lead deserves Nuseir or senior-team involvement?",
   ];
+  const blocks = reportBlocks([
+    { type: "heading1", text: "CEO Sales Brief" },
+    { type: "text", text: reportDate() },
+    { type: "text", text: bottomLine },
+    { type: "divider" },
+    { type: "heading2", text: "What Can Close" },
+    ...closeLines.map((text) => ({ type: "text", text }) as const),
+    { type: "divider" },
+    { type: "heading2", text: "Movement Since Last Report" },
+    { type: "text", text: movedToAgreement },
+    { type: "text", text: newAndNegative },
+    { type: "text", text: importantChanges },
+    { type: "divider" },
+    { type: "heading2", text: "Lead Board" },
+    { type: "text", text: boardLine("Signed", signed) },
+    { type: "text", text: boardLine("Agreement Stage", agreement) },
+    { type: "text", text: boardLine("Hot", hot) },
+    { type: "text", text: boardLine("Worth Watching", watch) },
+    { type: "divider" },
+    { type: "heading2", text: "New Leads Worth CEO Attention" },
+    ...newSignalLines.map((text) => ({ type: "text", text }) as const),
+    { type: "divider" },
+    { type: "heading2", text: "Pipeline Shape" },
+    { type: "text", text: inboundShape },
+    { type: "text", text: outboundShape },
+    { type: "divider" },
+    { type: "heading2", text: "CEO Decisions Needed" },
+    { type: "text", text: "1. Who owns the unassigned active opportunities?" },
+    { type: "text", text: "2. Which agreement-stage deal needs leadership help to close this week?" },
+    { type: "text", text: "3. Which hot lead deserves Nuseir or senior-team involvement?" },
+  ]);
 
   return {
     title,
+    blocks,
     paragraphs,
     sheetValues: paragraphs.map((paragraph) => [paragraph]),
     plainText: paragraphs.join("\n\n"),
   };
+}
+
+function reportBlocks(blocks: LarkReportBlock[]) {
+  return blocks;
 }
 
 function highProbabilityDeals(deals: SalesDeal[]) {

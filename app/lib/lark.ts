@@ -10,6 +10,12 @@ export type LarkDocumentContentBlock =
   | { type: "paragraph"; text: string }
   | { type: "table"; rows: string[][]; columnWidths?: number[] };
 
+export type LarkReportBlock =
+  | { type: "heading1"; text: string }
+  | { type: "heading2"; text: string }
+  | { type: "text"; text: string }
+  | { type: "divider" };
+
 async function getTenantAccessToken() {
   const appId = process.env.LARK_APP_ID;
   const appSecret = process.env.LARK_APP_SECRET;
@@ -166,6 +172,32 @@ export async function appendLarkDocumentTextBlocks({
   });
 }
 
+export async function appendLarkReportBlocks({
+  documentId,
+  blocks,
+}: {
+  documentId: string;
+  blocks: LarkReportBlock[];
+}) {
+  const chunks = chunk(blocks, 40);
+  let index = 0;
+
+  for (const blocksChunk of chunks) {
+    await larkRequest(
+      `/docx/v1/documents/${documentId}/blocks/${documentId}/children`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          index,
+          children: blocksChunk.map(toLarkBlock),
+        }),
+      },
+    );
+
+    index += blocksChunk.length;
+  }
+}
+
 async function appendParagraphsAtIndex({
   documentId,
   parentBlockId,
@@ -207,6 +239,45 @@ async function appendParagraphsAtIndex({
 
     nextIndex += paragraphsChunk.length;
   }
+}
+
+function toLarkBlock(block: LarkReportBlock) {
+  if (block.type === "divider") {
+    return { block_type: 22, divider: {} };
+  }
+
+  if (block.type === "heading1") {
+    return {
+      block_type: 3,
+      heading1: textPayload(block.text),
+    };
+  }
+
+  if (block.type === "heading2") {
+    return {
+      block_type: 4,
+      heading2: textPayload(block.text),
+    };
+  }
+
+  return {
+    block_type: 2,
+    text: textPayload(block.text),
+  };
+}
+
+function textPayload(content: string) {
+  return {
+    elements: [
+      {
+        text_run: {
+          content,
+          text_element_style: {},
+        },
+      },
+    ],
+    style: {},
+  };
 }
 
 export async function appendLarkDocumentBlocks({
