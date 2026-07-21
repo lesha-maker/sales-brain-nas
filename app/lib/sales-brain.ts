@@ -92,6 +92,7 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
     .sort((a, b) => b.value * b.probability - a.value * a.probability)
     .slice(0, 5);
   const salesQualified = deals.filter((deal) => deal.callStage === "Sales Qualified");
+  const upcomingCalls = upcomingBookedMeetings(deals);
 
   if (normalized.includes("stuck") || normalized.includes("risk")) {
     return [
@@ -105,6 +106,10 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
 
   if (normalized.includes("sales qualified")) {
     return `We have ${salesQualified.length} sales qualified leads right now.`;
+  }
+
+  if (asksAboutUpcomingCalls(normalized)) {
+    return `You have ${upcomingCalls.length} upcoming calls. I counted records where call stage is Booked a Meeting and the 1st meeting date is today or later.`;
   }
 
   if (normalized.includes("fit") || normalized.includes("qualified")) {
@@ -161,6 +166,7 @@ async function askOpenAI({
                 "Keep Lark replies short and human. Prefer 1-3 plain sentences for simple questions.",
                 "Do not use markdown formatting, bold text, code ticks, bullet points, or CRM jargon unless the user asks for a detailed report.",
                 "Say 'sales qualified' instead of 'Call Stage = Sales Qualified' unless the exact field name matters.",
+                "When the user asks how many calls are coming up, upcoming calls, or booked calls, count only CRM records where callStage is 'Booked a Meeting' and firstMeetingDate is today or later in Asia/Singapore.",
                 "Use the recent conversation to understand follow-up questions. For example, if the user asks for 'the list', infer the list from the previous answer.",
                 "If the follow-up is ambiguous, make your best inference from the recent conversation and say what you assumed.",
                 "When the CRM summary includes relevantDeals, use those records first for questions about a specific company or person.",
@@ -231,6 +237,7 @@ function buildCrmSummary(
     deals.filter((deal) => deal.callStage === "Sales Qualified"),
     20,
   );
+  const upcomingCalls = topDeals(upcomingBookedMeetings(deals), 20);
   const lateStageClosing = topDeals(
     deals.filter((deal) =>
       ["2nd call with Nuseir", "Confirmed (Verbal)", "Completed"].includes(deal.finalVerdict),
@@ -268,6 +275,9 @@ function buildCrmSummary(
     topReview,
     topNotFit,
     salesQualified,
+    upcomingCalls,
+    upcomingCallsDefinition:
+      "callStage is Booked a Meeting and firstMeetingDate is today or later in Asia/Singapore",
     lateStageClosing,
     proposalDone,
     relevantDeals,
@@ -395,6 +405,82 @@ function summarizeByOwner(deals: SalesDeal[]) {
     }))
     .sort((a, b) => b.weightedPipeline - a.weightedPipeline)
     .slice(0, 12);
+}
+
+function asksAboutUpcomingCalls(normalizedQuestion: string) {
+  const mentionsCall = /\b(call|calls|meeting|meetings)\b/.test(normalizedQuestion);
+  const mentionsUpcoming =
+    /\b(upcoming|coming up|booked|scheduled|today|tomorrow|next)\b/.test(normalizedQuestion);
+
+  return mentionsCall && mentionsUpcoming;
+}
+
+function upcomingBookedMeetings(deals: SalesDeal[]) {
+  const today = todayInSingapore();
+
+  return deals
+    .filter((deal) => deal.callStage === "Booked a Meeting")
+    .filter((deal) => {
+      const meetingDate = dateOnly(deal.firstMeetingDate);
+      return meetingDate ? meetingDate >= today : false;
+    })
+    .sort((a, b) => dateOnly(a.firstMeetingDate).localeCompare(dateOnly(b.firstMeetingDate)));
+}
+
+function todayInSingapore() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Singapore",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function dateOnly(value: string) {
+  const monthDay = value.match(
+    /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/i,
+  );
+
+  if (monthDay) {
+    const year = todayInSingapore().slice(0, 4);
+    const month = monthNumber(monthDay[1]);
+    const day = monthDay[2].padStart(2, "0");
+    return month ? `${year}-${month}-${day}` : "";
+  }
+
+  const parsed = Date.parse(value);
+
+  if (!Number.isNaN(parsed)) {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Singapore",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(parsed);
+  }
+
+  const match = value.match(/\d{4}-\d{2}-\d{2}/);
+  return match?.[0] || "";
+}
+
+function monthNumber(value: string) {
+  const months: Record<string, string> = {
+    jan: "01",
+    feb: "02",
+    mar: "03",
+    apr: "04",
+    may: "05",
+    jun: "06",
+    jul: "07",
+    aug: "08",
+    sep: "09",
+    sept: "09",
+    oct: "10",
+    nov: "11",
+    dec: "12",
+  };
+
+  return months[value.toLowerCase().slice(0, 4)] || months[value.toLowerCase().slice(0, 3)] || "";
 }
 
 function topDeals(deals: SalesDeal[], limit: number) {
