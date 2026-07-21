@@ -1,4 +1,3 @@
-import type { LarkDocumentContentBlock } from "./lark";
 import type { SalesDeal } from "./monday";
 import type { SalesMemoryChange, SalesMemorySnapshot } from "./sales-memory";
 
@@ -27,157 +26,90 @@ export function buildCeoSalesReport({
     (change) => change.field === "finalVerdict" && change.after === "Agreement Stage",
   );
   const notableConversations = notableConversationDeals(deals);
-  const keyPoints = [
+  const paragraphs = [
+    title,
+    `As of ${reportDate}: ${snapshot.summary.totalRecords.toLocaleString()} CRM records, ${countWhere(
+      deals,
+      (deal) => deal.callStage === "Sales Qualified",
+    )} sales qualified, ${agreementStage.length} in agreement stage, ${completed.length} completed, ${upcomingCalls.length} upcoming calls.`,
+    "First Fold: Closed / Agreement / High Probability",
+    ...formatBucket("Completed", completed, 4),
+    ...formatBucket("Agreement Stage", agreementStage, 5),
+    ...formatBucket("High Probability Of Closing", highProbability, 6),
+    "Key Points To Note",
     `This week, ${weekAgreementMoves.length} clients moved into Agreement Stage: ${listNames(
       weekAgreementMoves.map((change) => change.account),
     )}.`,
-    `Ironasylum is worth noting: sales qualified, Facebook source, owned by Ildiko, first meeting on ${firstDeal(
+    `Ironasylum: sales qualified, Facebook source, owned by Ildiko, first meeting ${firstDeal(
       deals,
       "Ironasylum",
     )?.firstMeetingDate || "unknown date"}.`,
-    `${upcomingCalls.length} booked meetings are coming up from today onward.`,
-    `${snapshot.summary.missing.owner.toLocaleString()} records are still unassigned. That is the main operating risk in the CRM.`,
-  ];
-
-  const blocks: LarkDocumentContentBlock[] = [
-    paragraph(title),
-    paragraph(
-      `Snapshot as of ${reportDate}: ${snapshot.summary.totalRecords.toLocaleString()} total records, ${countWhere(
-        deals,
-        (deal) => deal.callStage === "Sales Qualified",
-      )} sales qualified, ${agreementStage.length} agreement stage, ${completed.length} completed.`,
-    ),
-    paragraph("FIRST FOLD - WHAT THE CEO NEEDS TO SEE"),
-    table(firstFoldRows({ completed, agreementStage, highProbability })),
-    paragraph("KEY POINTS TO NOTE"),
-    ...keyPoints.map(paragraph),
-    paragraph("INBOUND SNAPSHOT"),
-    table(segmentRows(inbound), [130, 90, 90, 90, 90, 90, 90]),
-    paragraph("Top inbound names/stages are included in the first-fold table when they are completed, agreement stage, or high probability."),
-    paragraph("OUTBOUND SNAPSHOT"),
-    table(segmentRows(outbound), [130, 90, 90, 90, 90, 90, 90]),
-    paragraph("UPCOMING CALLS"),
-    table(dealRows(upcomingCalls.slice(0, 8)), [170, 130, 125, 120, 125, 130, 150]),
-    paragraph("NOTEWORTHY NEW OR ACTIVE CONVERSATIONS"),
-    table(dealRows(notableConversations.slice(0, 8)), [170, 130, 125, 120, 125, 130, 150]),
-    paragraph("CEO ACTIONS"),
-    table(
-      [
-        ["Priority", "Action", "Why it matters"],
-        [
-          "1",
-          "Assign owners to all active unassigned records.",
-          "Unowned qualified leads are the fastest way for pipeline to leak.",
-        ],
-        [
-          "2",
-          "Review every Agreement Stage and high-probability record today.",
-          "This is the smallest set with the clearest revenue signal.",
-        ],
-        [
-          "3",
-          "Use outbound as a high-intent motion, not a volume motion.",
-          "Outbound has fewer records but much higher sales-qualified density.",
-        ],
-      ],
-      [70, 310, 370],
-    ),
+    `${upcomingCalls.length} booked meetings are coming up from today onward. Top ones: ${listNames(
+      upcomingCalls.slice(0, 5).map((deal) => deal.account),
+    )}.`,
+    `Main risk: ${snapshot.summary.missing.owner.toLocaleString()} records are still unassigned.`,
+    "Inbound Snapshot",
+    segmentLine("Inbound", inbound),
+    "Outbound Snapshot",
+    segmentLine("Outbound", outbound),
+    "Noteworthy Conversations",
+    ...notableConversations.slice(0, 6).map(formatDeal),
+    "CEO Actions",
+    "1. Review Agreement Stage and high-probability records today.",
+    "2. Assign owners to every unassigned active record.",
+    "3. Confirm upcoming calls have owner, agenda, and next step before the call.",
   ];
 
   return {
     title,
-    blocks,
-    sheetValues: blocksToSheetValues(blocks),
-    paragraphs: blocks.flatMap((block) =>
-      block.type === "paragraph" ? [block.text] : [block.rows.map((row) => row.join(" | ")).join("\n")],
-    ),
-    plainText: blocks
-      .map((block) =>
-        block.type === "paragraph" ? block.text : block.rows.map((row) => row.join(" | ")).join("\n"),
-      )
-      .join("\n\n"),
+    paragraphs,
+    sheetValues: paragraphs.map((paragraph) => [paragraph]),
+    plainText: paragraphs.join("\n\n"),
   };
 }
 
-function blocksToSheetValues(blocks: LarkDocumentContentBlock[]) {
-  const values: string[][] = [];
-
-  for (const block of blocks) {
-    if (block.type === "paragraph") {
-      values.push([block.text]);
-      values.push([]);
-      continue;
-    }
-
-    values.push(...block.rows);
-    values.push([]);
-  }
-
-  return values;
-}
-
-function firstFoldRows({
-  completed,
-  agreementStage,
-  highProbability,
-}: {
-  completed: SalesDeal[];
-  agreementStage: SalesDeal[];
-  highProbability: SalesDeal[];
-}) {
-  return [
-    ["Bucket", "Account", "Owner", "Current Stage", "Source", "Meeting", "Budget", "Note"],
-    ...bucketRows("Completed", completed, 4),
-    ...bucketRows("Agreement Stage", agreementStage, 5),
-    ...bucketRows("High probability", highProbability, 8),
-  ];
-}
-
-function bucketRows(bucket: string, deals: SalesDeal[], limit: number) {
+function formatBucket(bucket: string, deals: SalesDeal[], limit: number) {
   if (!deals.length) {
-    return [[bucket, "None", "", "", "", "", "", ""]];
+    return [`${bucket}: none`];
   }
 
-  return deals.slice(0, limit).map((deal) => [
-    bucket,
+  return [
+    `${bucket}:`,
+    ...deals.slice(0, limit).map(formatDeal),
+  ];
+}
+
+function formatDeal(deal: SalesDeal) {
+  const parts = [
     deal.account,
-    cleanOwner(deal.owner),
     stageFor(deal),
-    sourceFor(deal),
-    deal.firstMeetingDate || deal.latestMeetingDate || "",
-    cleanValue(deal.budget),
-    shortNote(deal),
-  ]);
+    `owner: ${cleanOwner(deal.owner)}`,
+    `source: ${sourceFor(deal)}`,
+    deal.firstMeetingDate ? `meeting: ${deal.firstMeetingDate}` : "",
+    cleanValue(deal.budget) ? `budget: ${cleanValue(deal.budget)}` : "",
+    deal.email ? `contact: ${deal.email}` : "",
+  ].filter(Boolean);
+
+  return parts.join(" | ");
 }
 
-function segmentRows(deals: SalesDeal[]) {
-  return [
-    ["Segment", "Total", "Fit", "Review", "Sales Qualified", "Booked Meetings", "Agreement"],
-    [
-      isOutbound(deals[0] || ({} as SalesDeal)) ? "Outbound" : "Inbound",
-      String(deals.length),
-      String(countWhere(deals, (deal) => deal.qualification === "Fit")),
-      String(countWhere(deals, (deal) => deal.qualification === "Review")),
-      String(countWhere(deals, (deal) => deal.callStage === "Sales Qualified")),
-      String(countWhere(deals, (deal) => deal.callStage === "Booked a Meeting")),
-      String(countWhere(deals, (deal) => deal.finalVerdict === "Agreement Stage")),
-    ],
-  ];
-}
-
-function dealRows(deals: SalesDeal[]) {
-  return [
-    ["Account", "Owner", "Stage", "Source", "Meeting", "Budget", "Contact"],
-    ...deals.map((deal) => [
-      deal.account,
-      cleanOwner(deal.owner),
-      stageFor(deal),
-      sourceFor(deal),
-      deal.firstMeetingDate || deal.latestMeetingDate || "",
-      cleanValue(deal.budget),
-      deal.email || "",
-    ]),
-  ];
+function segmentLine(segment: string, deals: SalesDeal[]) {
+  return `${segment}: ${deals.length.toLocaleString()} records | ${countWhere(
+    deals,
+    (deal) => deal.qualification === "Fit",
+  )} fit | ${countWhere(
+    deals,
+    (deal) => deal.qualification === "Review",
+  )} review | ${countWhere(
+    deals,
+    (deal) => deal.callStage === "Sales Qualified",
+  )} sales qualified | ${countWhere(
+    deals,
+    (deal) => deal.callStage === "Booked a Meeting",
+  )} booked meetings | ${countWhere(
+    deals,
+    (deal) => deal.finalVerdict === "Agreement Stage",
+  )} agreement stage.`;
 }
 
 function highProbabilityDeals(deals: SalesDeal[]) {
@@ -287,21 +219,6 @@ function uniqueDeals(deals: SalesDeal[]) {
   });
 }
 
-function paragraph(text: string): LarkDocumentContentBlock {
-  return { type: "paragraph", text };
-}
-
-function table(
-  rows: string[][],
-  columnWidths = [100, 160, 130, 140, 110, 120, 110, 220],
-): LarkDocumentContentBlock {
-  return {
-    type: "table",
-    rows: rows.map((row) => row.map((cell) => cleanCell(cell))),
-    columnWidths,
-  };
-}
-
 function stageFor(deal: SalesDeal) {
   return [deal.callStage, deal.nextStepsStatus, deal.finalVerdict]
     .filter((value) => value && value !== "5")
@@ -318,18 +235,6 @@ function cleanOwner(owner: string) {
 
 function cleanValue(value: string) {
   return value && value !== "Unknown" ? value : "";
-}
-
-function shortNote(deal: SalesDeal) {
-  if (deal.salesCallNotes) return deal.salesCallNotes;
-  if (deal.followUp) return deal.followUp;
-  if (deal.agentNotes) return deal.agentNotes.split("\n")[0] || deal.agentNotes;
-  if (deal.lookingFor) return deal.lookingFor;
-  return "";
-}
-
-function cleanCell(value: string) {
-  return value.replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
 function listNames(names: string[]) {
