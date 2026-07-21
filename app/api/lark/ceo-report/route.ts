@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  appendLarkDocumentTextBlocks,
+  appendLarkDocumentBlocks,
   createLarkDocument,
   sendLarkTextReport,
 } from "../../../lib/lark";
@@ -28,9 +28,9 @@ export async function POST(request: NextRequest) {
     const report = buildCeoSalesReport({ snapshot, recentChanges });
     const document = await createLarkDocument({ title: report.title });
 
-    await appendLarkDocumentTextBlocks({
+    await appendLarkDocumentBlocks({
       documentId: document.documentId,
-      paragraphs: report.paragraphs,
+      blocks: report.blocks,
     });
 
     const chatId = body.chatId || process.env.LARK_SALES_CHAT_ID;

@@ -1,7 +1,6 @@
+import type { LarkDocumentContentBlock } from "./lark";
 import type { SalesDeal } from "./monday";
 import type { SalesMemoryChange, SalesMemorySnapshot } from "./sales-memory";
-
-type Segment = "Inbound" | "Outbound";
 
 export function buildCeoSalesReport({
   snapshot,
@@ -19,164 +18,233 @@ export function buildCeoSalesReport({
     dateStyle: "medium",
     timeStyle: "short",
   }).format(generatedAt);
-  const title = `CEO Sales Report - ${reportDate}`;
-  const upcomingCalls = upcomingBookedMeetings(deals);
-  const agreementStage = deals.filter((deal) => deal.finalVerdict === "Agreement Stage");
+  const title = `CEO Sales Snapshot - ${reportDate}`;
   const completed = deals.filter((deal) => deal.finalVerdict === "Completed");
-  const salesQualified = deals.filter((deal) => deal.callStage === "Sales Qualified");
-  const recentImportantChanges = recentChanges
-    .filter((change) =>
-      ["created", "callStage", "nextStepsStatus", "finalVerdict", "owner"].includes(change.field),
-    )
-    .slice(-12);
+  const agreementStage = deals.filter((deal) => deal.finalVerdict === "Agreement Stage");
+  const highProbability = highProbabilityDeals(deals);
+  const upcomingCalls = upcomingBookedMeetings(deals);
+  const weekAgreementMoves = changesThisWeek(recentChanges).filter(
+    (change) => change.field === "finalVerdict" && change.after === "Agreement Stage",
+  );
+  const notableConversations = notableConversationDeals(deals);
+  const keyPoints = [
+    `This week, ${weekAgreementMoves.length} clients moved into Agreement Stage: ${listNames(
+      weekAgreementMoves.map((change) => change.account),
+    )}.`,
+    `Ironasylum is worth noting: sales qualified, Facebook source, owned by Ildiko, first meeting on ${firstDeal(
+      deals,
+      "Ironasylum",
+    )?.firstMeetingDate || "unknown date"}.`,
+    `${upcomingCalls.length} booked meetings are coming up from today onward.`,
+    `${snapshot.summary.missing.owner.toLocaleString()} records are still unassigned. That is the main operating risk in the CRM.`,
+  ];
 
-  const paragraphs = [
-    title,
-    `Snapshot: ${snapshot.summary.totalRecords.toLocaleString()} CRM records as of ${reportDate}.`,
-    `CEO headline: ${salesQualified.length} sales qualified leads, ${upcomingCalls.length} upcoming booked calls, ${agreementStage.length} records in Agreement Stage, and ${completed.length} completed deals.`,
-    `The system is still heavily under-owned: ${snapshot.summary.missing.owner.toLocaleString()} records are unassigned, including a meaningful amount of qualified/active pipeline. That is the biggest operating risk in the CRM right now.`,
-    "",
-    "1. Executive Dashboard",
-    metricLine("Total records", snapshot.summary.totalRecords),
-    metricLine("Sales qualified leads", salesQualified.length),
-    metricLine("Upcoming calls", upcomingCalls.length),
-    metricLine("Proposal done", countWhere(deals, (deal) => deal.nextStepsStatus === "Proposal Done")),
-    metricLine("Agreement stage", agreementStage.length),
-    metricLine("Completed deals", completed.length),
-    metricLine("Unassigned records", snapshot.summary.missing.owner),
-    "",
-    "2. Inbound Leads",
-    segmentSummary("Inbound", inbound),
-    `Inbound is the volume engine: ${inbound.length.toLocaleString()} records, ${countWhere(
-      inbound,
-      (deal) => deal.callStage === "Sales Qualified",
-    )} sales qualified, ${countWhere(
-      inbound,
-      (deal) => deal.callStage === "Booked a Meeting",
-    )} booked meetings, and ${countWhere(
-      inbound,
-      (deal) => deal.nextStepsStatus === "Proposal Done",
-    )} proposal done records.`,
-    `Inbound quality split: ${countWhere(inbound, (deal) => deal.qualification === "Fit")} fit, ${countWhere(
-      inbound,
-      (deal) => deal.qualification === "Review",
-    )} review, and ${countWhere(inbound, (deal) => deal.qualification === "Not Fit")} not fit.`,
-    topDealLine(
-      "Top inbound records to watch",
-      topDeals(
-        inbound.filter((deal) =>
-          ["Sales Qualified", "Booked a Meeting"].includes(deal.callStage),
-        ),
-      ),
+  const blocks: LarkDocumentContentBlock[] = [
+    paragraph(title),
+    paragraph(
+      `Snapshot as of ${reportDate}: ${snapshot.summary.totalRecords.toLocaleString()} total records, ${countWhere(
+        deals,
+        (deal) => deal.callStage === "Sales Qualified",
+      )} sales qualified, ${agreementStage.length} agreement stage, ${completed.length} completed.`,
     ),
-    "",
-    "3. Outbound Leads",
-    segmentSummary("Outbound", outbound),
-    `Outbound is smaller but much denser: ${outbound.length} records, ${countWhere(
-      outbound,
-      (deal) => deal.callStage === "Sales Qualified",
-    )} sales qualified, ${countWhere(
-      outbound,
-      (deal) => deal.callStage === "Booked a Meeting",
-    )} booked meetings, and ${countWhere(
-      outbound,
-      (deal) => deal.nextStepsStatus === "Proposal Done",
-    )} proposal done records.`,
-    `Outbound quality split: ${countWhere(outbound, (deal) => deal.qualification === "Fit")} fit, ${countWhere(
-      outbound,
-      (deal) => deal.qualification === "Review",
-    )} review, and ${countWhere(outbound, (deal) => deal.qualification === "Not Fit")} not fit.`,
-    topDealLine(
-      "Top outbound records to watch",
-      topDeals(
-        outbound.filter((deal) =>
-          ["Sales Qualified", "Booked a Meeting"].includes(deal.callStage),
-        ),
-      ),
+    paragraph("FIRST FOLD - WHAT THE CEO NEEDS TO SEE"),
+    table(firstFoldRows({ completed, agreementStage, highProbability })),
+    paragraph("KEY POINTS TO NOTE"),
+    table([["Point"], ...keyPoints.map((point) => [point])], [760]),
+    paragraph("INBOUND SNAPSHOT"),
+    table(segmentRows(inbound), [130, 90, 90, 90, 90, 90, 90]),
+    paragraph("INBOUND NAMES AND STAGES"),
+    table(dealRows(topActiveDeals(inbound, 18)), [170, 130, 125, 120, 125, 130, 150]),
+    paragraph("OUTBOUND SNAPSHOT"),
+    table(segmentRows(outbound), [130, 90, 90, 90, 90, 90, 90]),
+    paragraph("OUTBOUND NAMES AND STAGES"),
+    table(dealRows(topActiveDeals(outbound, 18)), [170, 130, 125, 120, 125, 130, 150]),
+    paragraph("UPCOMING CALLS"),
+    table(dealRows(upcomingCalls.slice(0, 20)), [170, 130, 125, 120, 125, 130, 150]),
+    paragraph("NOTEWORTHY NEW OR ACTIVE CONVERSATIONS"),
+    table(dealRows(notableConversations), [170, 130, 125, 120, 125, 130, 150]),
+    paragraph("CEO ACTIONS"),
+    table(
+      [
+        ["Priority", "Action", "Why it matters"],
+        [
+          "1",
+          "Assign owners to all active unassigned records.",
+          "Unowned qualified leads are the fastest way for pipeline to leak.",
+        ],
+        [
+          "2",
+          "Review every Agreement Stage and high-probability record today.",
+          "This is the smallest set with the clearest revenue signal.",
+        ],
+        [
+          "3",
+          "Use outbound as a high-intent motion, not a volume motion.",
+          "Outbound has fewer records but much higher sales-qualified density.",
+        ],
+      ],
+      [70, 310, 370],
     ),
-    "",
-    "4. Calls And Near-Term Pipeline",
-    `Upcoming calls are defined as Call Stage = Booked a Meeting and 1st Meeting Date today or later. Today is ${todayInSingapore()} in Singapore time.`,
-    topDealLine("Upcoming booked calls", upcomingCalls.slice(0, 12)),
-    topDealLine("Agreement stage records", agreementStage),
-    topDealLine("Completed records", completed),
-    "",
-    "5. Operating Risks",
-    `Ownership gap: ${snapshot.summary.missing.owner.toLocaleString()} records are unassigned. The CEO-level question is not whether leads exist; it is whether every live lead has an accountable human owner.`,
-    `Follow-up hygiene: ${snapshot.summary.missing.lastFollowUp.toLocaleString()} records have no last follow-up date. This makes it hard to trust pipeline freshness without opening individual records.`,
-    `CRM blanks: monday is still returning many blank status values as '5'. The report filters around that, but the board should eventually normalize blank labels so reporting reads cleaner.`,
-    "",
-    "6. Recommended CEO Actions",
-    "Assign ownership for every sales qualified, booked meeting, proposal done, and agreement stage record today.",
-    "Review all upcoming calls and confirm each has a clear owner, agenda, and next step before the call happens.",
-    "Use outbound as a focused ABM motion: it is much smaller than inbound, but the fit rate and sales qualified density are materially stronger.",
-    "Keep inbound automated, but add a daily review queue for high-budget Fit/Review leads so the best ones do not sit unassigned.",
-    "",
-    "7. Recent Movement",
-    ...recentImportantChanges.map(formatChange),
   ];
 
   return {
     title,
-    paragraphs: paragraphs.filter((paragraph) => paragraph !== ""),
-    plainText: paragraphs.join("\n\n"),
+    blocks,
+    paragraphs: blocks.flatMap((block) =>
+      block.type === "paragraph" ? [block.text] : [block.rows.map((row) => row.join(" | ")).join("\n")],
+    ),
+    plainText: blocks
+      .map((block) =>
+        block.type === "paragraph" ? block.text : block.rows.map((row) => row.join(" | ")).join("\n"),
+      )
+      .join("\n\n"),
   };
 }
 
-function segmentSummary(segment: Segment, deals: SalesDeal[]) {
-  return `${segment}: ${deals.length.toLocaleString()} records, ${countWhere(
-    deals,
-    (deal) => deal.qualification === "Fit",
-  )} fit, ${countWhere(
-    deals,
-    (deal) => deal.callStage === "Sales Qualified",
-  )} sales qualified, ${countWhere(
-    deals,
-    (deal) => deal.callStage === "Booked a Meeting",
-  )} booked meetings, ${countWhere(
-    deals,
-    (deal) => deal.finalVerdict === "Agreement Stage",
-  )} agreement stage, ${countWhere(deals, (deal) => deal.finalVerdict === "Completed")} completed.`;
+function firstFoldRows({
+  completed,
+  agreementStage,
+  highProbability,
+}: {
+  completed: SalesDeal[];
+  agreementStage: SalesDeal[];
+  highProbability: SalesDeal[];
+}) {
+  return [
+    ["Bucket", "Account", "Owner", "Current Stage", "Source", "Meeting", "Budget", "Note"],
+    ...bucketRows("Completed", completed),
+    ...bucketRows("Agreement Stage", agreementStage),
+    ...bucketRows("High probability", highProbability),
+  ];
 }
 
-function metricLine(label: string, value: number) {
-  return `${label}: ${value.toLocaleString()}`;
+function bucketRows(bucket: string, deals: SalesDeal[]) {
+  if (!deals.length) {
+    return [[bucket, "None", "", "", "", "", "", ""]];
+  }
+
+  return deals.slice(0, 12).map((deal) => [
+    bucket,
+    deal.account,
+    cleanOwner(deal.owner),
+    stageFor(deal),
+    sourceFor(deal),
+    deal.firstMeetingDate || deal.latestMeetingDate || "",
+    cleanValue(deal.budget),
+    shortNote(deal),
+  ]);
 }
 
-function topDealLine(label: string, deals: SalesDeal[]) {
-  if (!deals.length) return `${label}: none.`;
-
-  return `${label}: ${deals
-    .slice(0, 12)
-    .map((deal) => {
-      const owner = deal.owner && deal.owner !== "Unassigned" ? `owner ${deal.owner}` : "unassigned";
-      const contact = deal.email ? `, ${deal.email}` : "";
-      const date = deal.firstMeetingDate ? `, meeting ${deal.firstMeetingDate}` : "";
-      const stage = [deal.callStage, deal.nextStepsStatus, deal.finalVerdict]
-        .filter((value) => value && value !== "5")
-        .join(" / ");
-
-      return `${deal.account}${contact}${stage ? ` (${stage})` : ""}${date}, ${owner}`;
-    })
-    .join("; ")}.`;
+function segmentRows(deals: SalesDeal[]) {
+  return [
+    ["Segment", "Total", "Fit", "Review", "Sales Qualified", "Booked Meetings", "Agreement"],
+    [
+      isOutbound(deals[0] || ({} as SalesDeal)) ? "Outbound" : "Inbound",
+      String(deals.length),
+      String(countWhere(deals, (deal) => deal.qualification === "Fit")),
+      String(countWhere(deals, (deal) => deal.qualification === "Review")),
+      String(countWhere(deals, (deal) => deal.callStage === "Sales Qualified")),
+      String(countWhere(deals, (deal) => deal.callStage === "Booked a Meeting")),
+      String(countWhere(deals, (deal) => deal.finalVerdict === "Agreement Stage")),
+    ],
+  ];
 }
 
-function topDeals(deals: SalesDeal[]) {
+function dealRows(deals: SalesDeal[]) {
+  return [
+    ["Account", "Owner", "Stage", "Source", "Meeting", "Budget", "Contact"],
+    ...deals.map((deal) => [
+      deal.account,
+      cleanOwner(deal.owner),
+      stageFor(deal),
+      sourceFor(deal),
+      deal.firstMeetingDate || deal.latestMeetingDate || "",
+      cleanValue(deal.budget),
+      deal.email || "",
+    ]),
+  ];
+}
+
+function highProbabilityDeals(deals: SalesDeal[]) {
+  return topActiveDeals(
+    deals.filter((deal) => {
+      if (["Completed", "Agreement Stage", "Lost", "Gone Cold"].includes(deal.finalVerdict)) {
+        return false;
+      }
+
+      return (
+        ["Confirmed (Verbal)", "2nd call with Nuseir"].includes(deal.finalVerdict) ||
+        deal.nextStepsStatus === "Proposal Done" ||
+        (deal.callStage === "Sales Qualified" && deal.qualification === "Fit")
+      );
+    }),
+    14,
+  );
+}
+
+function topActiveDeals(deals: SalesDeal[], limit: number) {
   return [...deals]
-    .sort((a, b) => b.value * b.probability - a.value * a.probability)
-    .slice(0, 12);
+    .filter((deal) =>
+      [
+        "Sales Qualified",
+        "Booked a Meeting",
+        "Proposal Done",
+        "Proposal Stage",
+        "Agreement Stage",
+        "Completed",
+        "Followed-Up",
+      ].some((stage) => stageFor(deal).includes(stage)),
+    )
+    .sort((a, b) => {
+      const stageScore = scoreDeal(b) - scoreDeal(a);
+      if (stageScore) return stageScore;
+      return b.value * b.probability - a.value * a.probability;
+    })
+    .slice(0, limit);
 }
 
-function isOutbound(deal: SalesDeal) {
-  return deal.source.toLowerCase().includes("outbound");
+function notableConversationDeals(deals: SalesDeal[]) {
+  const notableNames = ["Ironasylum", "LetsBeco", "Medlounges", "DS18", "Flexar"];
+  const named = deals.filter((deal) =>
+    notableNames.some((name) => deal.account.toLowerCase().includes(name.toLowerCase())),
+  );
+  const recentHighBudget = deals.filter(
+    (deal) =>
+      ["$300k-1m /year", "$1m+ /year", "$1m+ / year"].includes(deal.budget) &&
+      ["Fit", "Review", "5"].includes(deal.qualification),
+  );
+
+  return uniqueDeals([...named, ...topActiveDeals(recentHighBudget, 10)]).slice(0, 16);
 }
 
-function isInbound(deal: SalesDeal) {
-  return !isOutbound(deal);
+function scoreDeal(deal: SalesDeal) {
+  const stage = stageFor(deal);
+  if (stage.includes("Completed")) return 100;
+  if (stage.includes("Agreement Stage")) return 90;
+  if (stage.includes("Confirmed")) return 80;
+  if (stage.includes("2nd call")) return 75;
+  if (stage.includes("Proposal Done")) return 70;
+  if (stage.includes("Proposal Stage")) return 60;
+  if (stage.includes("Sales Qualified")) return 50;
+  if (stage.includes("Booked a Meeting")) return 40;
+  return 0;
 }
 
-function countWhere(deals: SalesDeal[], predicate: (deal: SalesDeal) => boolean) {
-  return deals.filter(predicate).length;
+function changesThisWeek(changes: SalesMemoryChange[]) {
+  const weekStart = startOfWeekInSingapore();
+  return changes.filter((change) => dateOnly(change.crawledAt) >= weekStart);
+}
+
+function startOfWeekInSingapore() {
+  const today = new Date(`${todayInSingapore()}T00:00:00+08:00`);
+  const day = today.getUTCDay() || 7;
+  today.setUTCDate(today.getUTCDate() - day + 1);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Singapore",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(today);
 }
 
 function upcomingBookedMeetings(deals: SalesDeal[]) {
@@ -191,6 +259,81 @@ function upcomingBookedMeetings(deals: SalesDeal[]) {
     .sort((a, b) => dateOnly(a.firstMeetingDate).localeCompare(dateOnly(b.firstMeetingDate)));
 }
 
+function firstDeal(deals: SalesDeal[], account: string) {
+  return deals.find((deal) => deal.account.toLowerCase().includes(account.toLowerCase()));
+}
+
+function uniqueDeals(deals: SalesDeal[]) {
+  const seen = new Set<string>();
+  return deals.filter((deal) => {
+    if (seen.has(deal.id)) return false;
+    seen.add(deal.id);
+    return true;
+  });
+}
+
+function paragraph(text: string): LarkDocumentContentBlock {
+  return { type: "paragraph", text };
+}
+
+function table(
+  rows: string[][],
+  columnWidths = [100, 160, 130, 140, 110, 120, 110, 220],
+): LarkDocumentContentBlock {
+  return {
+    type: "table",
+    rows: rows.map((row) => row.map((cell) => cleanCell(cell))),
+    columnWidths,
+  };
+}
+
+function stageFor(deal: SalesDeal) {
+  return [deal.callStage, deal.nextStepsStatus, deal.finalVerdict]
+    .filter((value) => value && value !== "5")
+    .join(" / ");
+}
+
+function sourceFor(deal: SalesDeal) {
+  return deal.source && deal.source !== "5" ? deal.source : "Unknown";
+}
+
+function cleanOwner(owner: string) {
+  return owner && owner !== "Unassigned" ? owner : "Unassigned";
+}
+
+function cleanValue(value: string) {
+  return value && value !== "Unknown" ? value : "";
+}
+
+function shortNote(deal: SalesDeal) {
+  if (deal.salesCallNotes) return deal.salesCallNotes;
+  if (deal.followUp) return deal.followUp;
+  if (deal.agentNotes) return deal.agentNotes.split("\n")[0] || deal.agentNotes;
+  if (deal.lookingFor) return deal.lookingFor;
+  return "";
+}
+
+function cleanCell(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function listNames(names: string[]) {
+  if (!names.length) return "none";
+  return [...new Set(names)].join(", ");
+}
+
+function isOutbound(deal: SalesDeal) {
+  return deal.source?.toLowerCase().includes("outbound") || false;
+}
+
+function isInbound(deal: SalesDeal) {
+  return !isOutbound(deal);
+}
+
+function countWhere(deals: SalesDeal[], predicate: (deal: SalesDeal) => boolean) {
+  return deals.filter(predicate).length;
+}
+
 function todayInSingapore() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Singapore",
@@ -203,14 +346,4 @@ function todayInSingapore() {
 function dateOnly(value: string) {
   const match = value.match(/\d{4}-\d{2}-\d{2}/);
   return match?.[0] || "";
-}
-
-function formatChange(change: SalesMemoryChange) {
-  if (change.field === "created") {
-    return `${change.account}: new CRM record created.`;
-  }
-
-  return `${change.account}: ${change.field} changed from ${change.before || "blank"} to ${
-    change.after || "blank"
-  }.`;
 }

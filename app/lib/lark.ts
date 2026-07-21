@@ -6,6 +6,10 @@ type LarkApiPayload<T> = {
   data?: T;
 };
 
+export type LarkDocumentContentBlock =
+  | { type: "paragraph"; text: string }
+  | { type: "table"; rows: string[][]; columnWidths?: number[] };
+
 async function getTenantAccessToken() {
   const appId = process.env.LARK_APP_ID;
   const appSecret = process.env.LARK_APP_SECRET;
@@ -105,16 +109,35 @@ export async function appendLarkDocumentTextBlocks({
   documentId: string;
   paragraphs: string[];
 }) {
+  await appendParagraphsAtIndex({
+    documentId,
+    parentBlockId: documentId,
+    paragraphs,
+    index: 0,
+  });
+}
+
+async function appendParagraphsAtIndex({
+  documentId,
+  parentBlockId,
+  paragraphs,
+  index,
+}: {
+  documentId: string;
+  parentBlockId: string;
+  paragraphs: string[];
+  index: number;
+}) {
   const chunks = chunk(paragraphs.filter(Boolean), 40);
-  let index = 0;
+  let nextIndex = index;
 
   for (const paragraphsChunk of chunks) {
     await larkRequest(
-      `/docx/v1/documents/${documentId}/blocks/${documentId}/children`,
+      `/docx/v1/documents/${documentId}/blocks/${parentBlockId}/children`,
       {
         method: "POST",
         body: JSON.stringify({
-          index,
+          index: nextIndex,
           children: paragraphsChunk.map((paragraph) => ({
             block_type: 2,
             text: {
@@ -133,7 +156,111 @@ export async function appendLarkDocumentTextBlocks({
       },
     );
 
-    index += paragraphsChunk.length;
+    nextIndex += paragraphsChunk.length;
+  }
+}
+
+export async function appendLarkDocumentBlocks({
+  documentId,
+  blocks,
+}: {
+  documentId: string;
+  blocks: LarkDocumentContentBlock[];
+}) {
+  let index = 0;
+
+  for (const block of blocks) {
+    if (block.type === "paragraph") {
+      await appendParagraphsAtIndex({
+        documentId,
+        parentBlockId: documentId,
+        paragraphs: [block.text],
+        index,
+      });
+      index += 1;
+      continue;
+    }
+
+    await appendLarkTable({
+      documentId,
+      rows: block.rows,
+      columnWidths: block.columnWidths,
+      index,
+    });
+    index += 1;
+  }
+}
+
+async function appendLarkTable({
+  documentId,
+  rows,
+  columnWidths,
+  index,
+}: {
+  documentId: string;
+  rows: string[][];
+  columnWidths?: number[];
+  index: number;
+}) {
+  if (!rows.length || !rows[0]?.length) return;
+
+  const rowSize = rows.length;
+  const columnSize = rows[0].length;
+  const createPayload = await larkRequest<{
+    children?: Array<{
+      block_id?: string;
+      block_type?: number;
+      table?: {
+        cells?: string[];
+      };
+    }>;
+  }>(`/docx/v1/documents/${documentId}/blocks/${documentId}/children`, {
+    method: "POST",
+    body: JSON.stringify({
+      index,
+      children: [
+        {
+          block_type: 31,
+          table: {
+            property: {
+              row_size: rowSize,
+              column_size: columnSize,
+              header_row: true,
+              ...(columnWidths?.length === columnSize ? { column_width: columnWidths } : {}),
+            },
+          },
+        },
+      ],
+    }),
+  });
+
+  const tableBlock = createPayload.children?.find((child) => child.block_type === 31);
+  const tableBlockId = tableBlock?.block_id;
+
+  if (!tableBlockId) {
+    throw new Error("Lark created no table block_id.");
+  }
+
+  const table = await getLarkDocumentBlock(documentId, tableBlockId);
+  const cells = table.table?.cells || tableBlock.table?.cells || [];
+
+  if (cells.length < rowSize * columnSize) {
+    throw new Error("Lark table did not return enough cell IDs to write values.");
+  }
+
+  for (let row = 0; row < rowSize; row += 1) {
+    for (let column = 0; column < columnSize; column += 1) {
+      const cellId = cells[row * columnSize + column];
+      const value = rows[row]?.[column] || "";
+
+      if (!cellId || !value) continue;
+
+      await appendTextToBlock({
+        documentId,
+        blockId: cellId,
+        text: value,
+      });
+    }
   }
 }
 
@@ -165,6 +292,41 @@ export async function replyToLarkMessage({
   }
 
   return payload;
+}
+
+async function getLarkDocumentBlock(documentId: string, blockId: string) {
+  const payload = await larkRequest<{
+    block?: {
+      block_id?: string;
+      block_type?: number;
+      table?: {
+        cells?: string[];
+      };
+    };
+  }>(`/docx/v1/documents/${documentId}/blocks/${blockId}`);
+
+  if (!payload.block) {
+    throw new Error("Lark returned no block data.");
+  }
+
+  return payload.block;
+}
+
+async function appendTextToBlock({
+  documentId,
+  blockId,
+  text,
+}: {
+  documentId: string;
+  blockId: string;
+  text: string;
+}) {
+  await appendParagraphsAtIndex({
+    documentId,
+    parentBlockId: blockId,
+    paragraphs: [text.slice(0, 1800)],
+    index: 0,
+  });
 }
 
 async function larkRequest<T>(
