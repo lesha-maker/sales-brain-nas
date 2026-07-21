@@ -29,7 +29,10 @@ export function buildCeoSalesReport({
   const inbound = deals.filter((deal) => !isOutbound(deal));
   const outbound = deals.filter(isOutbound);
   const newSignals = newLeadSignals(deals, recentChanges).slice(0, 5);
-  const bottomLine = `Bottom line: ${agreement.length} deals are in agreement stage, ${hot.length} are hot, and ${upcomingCalls.length} booked calls are coming up. The main execution risk is ownership: ${activeUnassigned.length} active records are still unassigned.`;
+  const signedCount = deals.filter((deal) => deal.finalVerdict === "Completed").length;
+  const inboundSqls = countWhere(inbound, (deal) => deal.callStage === "Sales Qualified");
+  const outboundSqls = countWhere(outbound, (deal) => deal.callStage === "Sales Qualified");
+  const bottomLine = `Sales has ${agreement.length} deals in agreement stage, ${hot.length} high-probability opportunities, and ${upcomingCalls.length} booked calls coming up. The biggest thing to watch is ownership: ${activeUnassigned.length} active opportunities are still unassigned.`;
   const movedToAgreement = `Moved to agreement: ${movement.agreementMoves.length ? listNames(movement.agreementMoves) : "none"}.`;
   const newAndNegative = `New records added: ${movement.createdCount}. Losses/no-shows: ${movement.negativeCount}.`;
   const importantChanges = movement.important.length
@@ -43,66 +46,116 @@ export function buildCeoSalesReport({
     outbound,
     (deal) => deal.callStage === "Sales Qualified",
   )} sales qualified, ${countWhere(outbound, (deal) => deal.callStage === "Booked a Meeting")} booked calls.`;
-  const closeLines = dealLines([...agreement, ...hot].slice(0, 8));
   const newSignalLines = newSignals.length
     ? dealLines(newSignals)
     : ["No new high-signal leads found in the latest CRM changes."];
+  const summaryRows = [
+    ["Metric", "Current Value"],
+    ["Total CRM Records", deals.length.toLocaleString()],
+    ["Inbound SQLs", String(inboundSqls)],
+    ["Outbound SQLs", String(outboundSqls)],
+    ["Agreement Stage", String(agreement.length)],
+    ["High-Probability / Hot", String(hot.length)],
+    ["Upcoming Booked Calls", String(upcomingCalls.length)],
+    ["Completed Deals", String(signedCount)],
+    ["New Records This Week", String(movement.createdCount)],
+    ["Moved To Agreement This Week", String(movement.agreementMoves.length)],
+    ["Lost / No-Show Movement", String(movement.negativeCount)],
+    ["Unassigned Active Opportunities", String(activeUnassigned.length)],
+  ];
+  const closingRows = closingBoardRows({
+    signed,
+    agreement,
+    hot,
+    watch,
+  });
+  const takeawayOne = agreement.length
+    ? `The closing lane is real but narrow: ${listDealNames(agreement, 4)} are already in agreement stage. These should get the most operational attention this week.`
+    : "There are no deals currently marked agreement stage, so the focus should be moving the strongest hot leads into a closeable lane.";
+  const takeawayTwo = hot.length
+    ? `The next layer of closable pipeline is ${listDealNames(hot, 5)}. These are not just generic SQLs; they have proposal, verbal-confirmed, or second-call signals.`
+    : "There are no obvious high-probability leads after agreement stage, which means the team needs to rebuild the next closeable layer.";
+  const takeawayThree = newSignals.length
+    ? `New or newly important leads worth attention: ${listDealNames(newSignals, 5)}. These should be checked for owner, next step, and meeting date.`
+    : "No new high-signal leads stood out in the latest CRM change set.";
+  const takeawayFour = `Inbound is carrying ${inboundSqls} SQLs and outbound is carrying ${outboundSqls}. The CEO read should stay split by source because the operating motion is different for each.`;
+  const takeawayFive = activeUnassigned.length
+    ? `${activeUnassigned.length} active opportunities are unassigned. This is the main execution leak because good leads can look healthy in stage while nobody is clearly accountable.`
+    : "Ownership looks clean on the active pipeline right now.";
+  const ceoTakeaway = `The pipeline has enough activity to manage, but the CEO view should stay focused on conversion discipline: close the agreement-stage deals, protect the hot leads, and assign every active opportunity.`;
 
   const paragraphs = [
-    reportDate(),
-    "CEO Sales Brief",
+    title,
+    `Modified ${reportDate()}`,
+    "Executive Summary",
     bottomLine,
-    "What Can Close",
-    ...closeLines,
-    "Movement Since Last Report",
+    `This week: ${movedToAgreement} ${newAndNegative}`,
+    "The CEO focus should be simple: close agreement-stage deals, push the hot opportunities, and fix ownership gaps before they leak pipeline.",
+    "Current Sales Snapshot",
+    ...summaryRows.map((row) => row.join(" | ")),
+    "Closing Board",
+    ...closingRows.map((row) => row.join(" | ")),
+    "Key Takeaways For CEO",
+    `1. ${takeawayOne}`,
+    `2. ${takeawayTwo}`,
+    `3. ${takeawayThree}`,
+    `4. ${takeawayFour}`,
+    `5. ${takeawayFive}`,
+    "Recommended Decisions",
+    "1. Which agreement-stage deal needs senior help this week?",
+    "2. Who owns every unassigned active opportunity by end of day?",
+    "3. Which hot lead deserves Nuseir or leadership involvement?",
+    "CEO Takeaway",
+    ceoTakeaway,
+    "Appendix: Recent CRM Movement",
     movedToAgreement,
     newAndNegative,
     importantChanges,
-    "Lead Board",
-    boardLine("Signed", signed),
-    boardLine("Agreement Stage", agreement),
-    boardLine("Hot", hot),
-    boardLine("Worth Watching", watch),
-    "New Leads Worth CEO Attention",
-    ...newSignalLines,
-    "Pipeline Shape",
     inboundShape,
     outboundShape,
-    "CEO Decisions Needed",
-    "1. Who owns the unassigned active opportunities?",
-    "2. Which agreement-stage deal needs leadership help to close this week?",
-    "3. Which hot lead deserves Nuseir or senior-team involvement?",
+    ...newSignalLines,
   ];
   const blocks = reportBlocks([
-    { type: "heading1", text: "CEO Sales Brief" },
-    { type: "text", text: reportDate() },
+    { type: "heading1", text: title },
+    { type: "text", text: `Modified ${reportDate()}` },
+    { type: "heading2", text: "Executive Summary" },
     { type: "text", text: bottomLine },
+    { type: "text", text: `This week: ${movedToAgreement} ${newAndNegative}` },
+    {
+      type: "text",
+      text: "The CEO focus should be simple: close agreement-stage deals, push the hot opportunities, and fix ownership gaps before they leak pipeline.",
+    },
     { type: "divider" },
-    { type: "heading2", text: "What Can Close" },
-    ...closeLines.map((text) => ({ type: "text", text }) as const),
+    { type: "heading2", text: "Current Sales Snapshot" },
+    { type: "table", rows: summaryRows },
     { type: "divider" },
-    { type: "heading2", text: "Movement Since Last Report" },
-    { type: "text", text: movedToAgreement },
-    { type: "text", text: newAndNegative },
+    { type: "heading2", text: "Closing Board" },
+    { type: "table", rows: closingRows },
+    { type: "divider" },
+    { type: "heading2", text: "Key Takeaways For CEO" },
+    { type: "heading2", text: "1. Closing lane is the priority" },
+    { type: "text", text: takeawayOne },
+    { type: "heading2", text: "2. Hot pipeline needs a push" },
+    { type: "text", text: takeawayTwo },
+    { type: "heading2", text: "3. New signals need fast ownership" },
+    { type: "text", text: takeawayThree },
+    { type: "heading2", text: "4. Inbound and outbound need separate reads" },
+    { type: "text", text: takeawayFour },
+    { type: "heading2", text: "5. Ownership is the main execution risk" },
+    { type: "text", text: takeawayFive },
+    { type: "divider" },
+    { type: "heading2", text: "Recommended Decisions" },
+    { type: "text", text: "1. Which agreement-stage deal needs senior help this week?" },
+    { type: "text", text: "2. Who owns every unassigned active opportunity by end of day?" },
+    { type: "text", text: "3. Which hot lead deserves Nuseir or leadership involvement?" },
+    { type: "divider" },
+    { type: "heading2", text: "CEO Takeaway" },
+    { type: "text", text: ceoTakeaway },
+    { type: "divider" },
+    { type: "heading2", text: "Appendix: Recent CRM Movement" },
     { type: "text", text: importantChanges },
-    { type: "divider" },
-    { type: "heading2", text: "Lead Board" },
-    { type: "text", text: boardLine("Signed", signed) },
-    { type: "text", text: boardLine("Agreement Stage", agreement) },
-    { type: "text", text: boardLine("Hot", hot) },
-    { type: "text", text: boardLine("Worth Watching", watch) },
-    { type: "divider" },
-    { type: "heading2", text: "New Leads Worth CEO Attention" },
-    ...newSignalLines.map((text) => ({ type: "text", text }) as const),
-    { type: "divider" },
-    { type: "heading2", text: "Pipeline Shape" },
     { type: "text", text: inboundShape },
     { type: "text", text: outboundShape },
-    { type: "divider" },
-    { type: "heading2", text: "CEO Decisions Needed" },
-    { type: "text", text: "1. Who owns the unassigned active opportunities?" },
-    { type: "text", text: "2. Which agreement-stage deal needs leadership help to close this week?" },
-    { type: "text", text: "3. Which hot lead deserves Nuseir or senior-team involvement?" },
   ]);
 
   return {
@@ -116,6 +169,49 @@ export function buildCeoSalesReport({
 
 function reportBlocks(blocks: LarkReportBlock[]) {
   return blocks;
+}
+
+function closingBoardRows({
+  signed,
+  agreement,
+  hot,
+  watch,
+}: {
+  signed: SalesDeal[];
+  agreement: SalesDeal[];
+  hot: SalesDeal[];
+  watch: SalesDeal[];
+}) {
+  const rows = [["Lane", "Lead", "Owner", "Signal"]];
+  const sections = [
+    ["Completed", signed.slice(0, 4)],
+    ["Agreement Stage", agreement.slice(0, 5)],
+    ["High Probability", hot.slice(0, 6)],
+    ["Worth Watching", watch.slice(0, 6)],
+  ] as const;
+
+  for (const [lane, deals] of sections) {
+    if (!deals.length) {
+      rows.push([lane, "None", "", ""]);
+      continue;
+    }
+
+    for (const deal of deals) {
+      rows.push([lane, deal.account, cleanOwner(deal.owner), conciseSignal(deal)]);
+    }
+  }
+
+  return rows.slice(0, 18);
+}
+
+function conciseSignal(deal: SalesDeal) {
+  return [
+    stageFor(deal),
+    deal.firstMeetingDate ? `meeting ${dateLabel(deal.firstMeetingDate)}` : "",
+    deal.budget && deal.budget !== "Unknown" ? deal.budget : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
 }
 
 function highProbabilityDeals(deals: SalesDeal[]) {
@@ -220,8 +316,9 @@ function dealLine(deal: SalesDeal) {
   return parts.join(" | ");
 }
 
-function boardLine(label: string, deals: SalesDeal[]) {
-  return `${label}: ${deals.length ? deals.map(shortDealName).join(", ") : "none"}`;
+function listDealNames(deals: SalesDeal[], limit: number) {
+  const names = deals.slice(0, limit).map(shortDealName);
+  return names.length ? names.join(", ") : "none";
 }
 
 function scoreDeal(deal: SalesDeal) {

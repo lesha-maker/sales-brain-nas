@@ -14,6 +14,7 @@ export type LarkReportBlock =
   | { type: "heading1"; text: string }
   | { type: "heading2"; text: string }
   | { type: "text"; text: string }
+  | { type: "table"; rows: string[][]; columnWidths?: number[] }
   | { type: "divider" };
 
 async function getTenantAccessToken() {
@@ -179,22 +180,32 @@ export async function appendLarkReportBlocks({
   documentId: string;
   blocks: LarkReportBlock[];
 }) {
-  const chunks = chunk(blocks, 40);
   let index = 0;
 
-  for (const blocksChunk of chunks) {
+  for (const block of blocks) {
+    if (block.type === "table") {
+      await appendLarkTable({
+        documentId,
+        rows: block.rows,
+        columnWidths: block.columnWidths,
+        index,
+      });
+      index += 1;
+      continue;
+    }
+
     await larkRequest(
       `/docx/v1/documents/${documentId}/blocks/${documentId}/children`,
       {
         method: "POST",
         body: JSON.stringify({
           index,
-          children: blocksChunk.map(toLarkBlock),
+          children: [toLarkBlock(block)],
         }),
       },
     );
 
-    index += blocksChunk.length;
+    index += 1;
   }
 }
 
