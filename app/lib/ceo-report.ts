@@ -50,19 +50,16 @@ export function buildCeoSalesReport({
     paragraph("FIRST FOLD - WHAT THE CEO NEEDS TO SEE"),
     table(firstFoldRows({ completed, agreementStage, highProbability })),
     paragraph("KEY POINTS TO NOTE"),
-    table([["Point"], ...keyPoints.map((point) => [point])], [760]),
+    ...keyPoints.map(paragraph),
     paragraph("INBOUND SNAPSHOT"),
     table(segmentRows(inbound), [130, 90, 90, 90, 90, 90, 90]),
-    paragraph("INBOUND NAMES AND STAGES"),
-    table(dealRows(topActiveDeals(inbound, 18)), [170, 130, 125, 120, 125, 130, 150]),
+    paragraph("Top inbound names/stages are included in the first-fold table when they are completed, agreement stage, or high probability."),
     paragraph("OUTBOUND SNAPSHOT"),
     table(segmentRows(outbound), [130, 90, 90, 90, 90, 90, 90]),
-    paragraph("OUTBOUND NAMES AND STAGES"),
-    table(dealRows(topActiveDeals(outbound, 18)), [170, 130, 125, 120, 125, 130, 150]),
     paragraph("UPCOMING CALLS"),
-    table(dealRows(upcomingCalls.slice(0, 20)), [170, 130, 125, 120, 125, 130, 150]),
+    table(dealRows(upcomingCalls.slice(0, 8)), [170, 130, 125, 120, 125, 130, 150]),
     paragraph("NOTEWORTHY NEW OR ACTIVE CONVERSATIONS"),
-    table(dealRows(notableConversations), [170, 130, 125, 120, 125, 130, 150]),
+    table(dealRows(notableConversations.slice(0, 8)), [170, 130, 125, 120, 125, 130, 150]),
     paragraph("CEO ACTIONS"),
     table(
       [
@@ -112,18 +109,18 @@ function firstFoldRows({
 }) {
   return [
     ["Bucket", "Account", "Owner", "Current Stage", "Source", "Meeting", "Budget", "Note"],
-    ...bucketRows("Completed", completed),
-    ...bucketRows("Agreement Stage", agreementStage),
-    ...bucketRows("High probability", highProbability),
+    ...bucketRows("Completed", completed, 4),
+    ...bucketRows("Agreement Stage", agreementStage, 5),
+    ...bucketRows("High probability", highProbability, 8),
   ];
 }
 
-function bucketRows(bucket: string, deals: SalesDeal[]) {
+function bucketRows(bucket: string, deals: SalesDeal[], limit: number) {
   if (!deals.length) {
     return [[bucket, "None", "", "", "", "", "", ""]];
   }
 
-  return deals.slice(0, 12).map((deal) => [
+  return deals.slice(0, limit).map((deal) => [
     bucket,
     deal.account,
     cleanOwner(deal.owner),

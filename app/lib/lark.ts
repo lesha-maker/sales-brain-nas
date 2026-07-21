@@ -248,6 +248,8 @@ async function appendLarkTable({
     throw new Error("Lark table did not return enough cell IDs to write values.");
   }
 
+  const writes: Array<Promise<void>> = [];
+
   for (let row = 0; row < rowSize; row += 1) {
     for (let column = 0; column < columnSize; column += 1) {
       const cellId = cells[row * columnSize + column];
@@ -255,12 +257,12 @@ async function appendLarkTable({
 
       if (!cellId || !value) continue;
 
-      await appendTextToBlock({
-        documentId,
-        blockId: cellId,
-        text: value,
-      });
+      writes.push(appendTextToBlock({ documentId, blockId: cellId, text: value }));
     }
+  }
+
+  for (const writesChunk of chunk(writes, 8)) {
+    await Promise.all(writesChunk);
   }
 }
 
