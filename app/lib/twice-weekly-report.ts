@@ -44,12 +44,19 @@ export async function createTwiceWeeklySalesReport({
     title: `Sales Pulse - ${report.title.replace(/^CEO Sales Brief -\s*/, "")}`,
   });
 
-  try {
-    await appendLarkReportBlocks({
-      documentId: document.documentId,
-      blocks: report.blocks,
-    });
-  } catch {
+  if (process.env.SALES_BRAIN_USE_LARK_TABLE_BLOCKS === "true") {
+    try {
+      await appendLarkReportBlocks({
+        documentId: document.documentId,
+        blocks: report.blocks,
+      });
+    } catch {
+      await appendLarkDocumentTextBlocks({
+        documentId: document.documentId,
+        paragraphs: report.paragraphs,
+      });
+    }
+  } else {
     await appendLarkDocumentTextBlocks({
       documentId: document.documentId,
       paragraphs: report.paragraphs,

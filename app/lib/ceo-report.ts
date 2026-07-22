@@ -321,7 +321,11 @@ function newEnterpriseSignals(deals: SalesDeal[], changes: SalesMemoryChange[]) 
     named.some((name) => deal.account.toLowerCase().includes(name.toLowerCase())),
   );
 
-  return uniqueDeals([...created.filter(isEnterpriseLead), ...notable, ...topByStage(deals, isMillionPlusLead, 8)])
+  return uniqueDeals([
+    ...created.filter((deal) => isEnterpriseLead(deal) && !isNegative(deal)),
+    ...notable.filter((deal) => !isNegative(deal)),
+    ...topByStage(deals, (deal) => isMillionPlusLead(deal) && !isNegative(deal), 8),
+  ])
     .sort((a, b) => scoreDeal(b) - scoreDeal(a))
     .slice(0, 10);
 }
@@ -404,10 +408,8 @@ function dealBullets(deals: SalesDeal[], formatter: (deal: SalesDeal) => string)
 }
 
 function progressNote(deal: SalesDeal) {
-  const notes = stripHtml(deal.agentNotes || deal.salesCallNotes || deal.lookingFor);
-  if (notes) return shortSentence(notes);
-
   if (deal.finalVerdict === "Agreement Stage") return "Agreement stage; needs close follow-up.";
+  if (deal.finalVerdict === "Signed" || deal.finalVerdict === "Completed") return "Signed or completed.";
   if (deal.finalVerdict === "Confirmed (Verbal)") return "Verbally confirmed; needs conversion to agreement.";
   if (deal.finalVerdict === "2nd call with Nuseir") return "Second call with Nuseir; leadership involvement is already in motion.";
   if (deal.nextStepsStatus === "Proposal Done") return "Proposal sent; waiting for response or next push.";
@@ -430,7 +432,7 @@ function scoreDeal(deal: SalesDeal) {
   const stage = stageFor(deal);
   let score = 0;
 
-  if (stage.includes("Completed")) score += 100;
+  if (stage.includes("Completed") || stage.includes("Signed")) score += 100;
   if (stage.includes("Agreement Stage")) score += 90;
   if (stage.includes("Confirmed")) score += 80;
   if (stage.includes("2nd call")) score += 75;
@@ -445,7 +447,7 @@ function scoreDeal(deal: SalesDeal) {
 }
 
 function isCompleted(deal: SalesDeal) {
-  return deal.finalVerdict === "Completed";
+  return deal.finalVerdict === "Completed" || deal.finalVerdict === "Signed";
 }
 
 function isAgreementStage(deal: SalesDeal) {
@@ -591,18 +593,4 @@ function dateLabel(value: string) {
     month: "short",
     day: "numeric",
   }).format(date);
-}
-
-function stripHtml(value: string) {
-  return value
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function shortSentence(value: string) {
-  const sentence = value.split(/(?<=[.!?])\s+/)[0] || value;
-  return sentence.length > 150 ? `${sentence.slice(0, 147).trim()}...` : sentence;
 }
