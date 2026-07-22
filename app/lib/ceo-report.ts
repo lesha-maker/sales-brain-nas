@@ -33,7 +33,6 @@ export function buildCeoSalesReport({
   const movement = movementSinceLastReport(recentChanges);
   const dinnerMarkets = groupDinnerFollowUps(pipeline.dinnerFollowUps);
   const newCeoLevel = pipeline.newEnterprise.filter(isMillionPlusLead).slice(0, 2);
-  const newMeetingCount = pipeline.upcomingMeetings.length;
   const agreementMoveCount = movement.agreementMoves.length || pipeline.agreement.length;
   const health = pipeline.agreement.length + pipeline.hot.length >= 8 ? "Strong" : "Needs focus";
 
@@ -43,15 +42,6 @@ export function buildCeoSalesReport({
     `${newCeoLevel.length} CEO-level opportunities, and generated ` +
     `${pipeline.dinnerFollowUps.length} qualified follow-up meetings from CMO dinners.`;
 
-  const pipelineHealthRows = [
-    ["Overall Health", health],
-    ["Agreement Stage", String(pipeline.agreement.length)],
-    ["Hot Opportunities", String(pipeline.hot.length)],
-    ["Worth a Second Call", String(pipeline.worthSecondCall.length)],
-    ["Upcoming Enterprise Meetings", String(newMeetingCount)],
-    ["CMO Dinner Follow-ups", String(pipeline.dinnerFollowUps.length)],
-    ["Active Late-stage Opportunities", String(pipeline.activeEnterpriseCount)],
-  ];
   const snapshotRows = pipelineSnapshotRows(pipeline);
   const newEnterpriseRows = tableRows(
     ["Lead", "Signal", "Owner"],
@@ -138,33 +128,33 @@ export function buildCeoSalesReport({
     { type: "text", text: executiveSummary },
     { type: "divider" },
     { type: "heading2", text: "Pipeline Health" },
-    { type: "table", rows: pipelineHealthRows },
+    { type: "heading3", text: `Overall Health: ${health}` },
     { type: "text", text: "Key highlights" },
-    ...keyHighlights.map((text) => ({ type: "text" as const, text: `- ${text}` })),
+    ...keyHighlights.map((text) => ({ type: "bullet" as const, text })),
     { type: "divider" },
     { type: "heading2", text: "Enterprise Pipeline Snapshot" },
     { type: "table", rows: snapshotRows },
     { type: "divider" },
     { type: "heading2", text: "Pipeline Progress Since Last Update" },
-    ...progressLines.map((text) => ({ type: "text" as const, text })),
+    ...progressBlocks(progressLines),
     { type: "divider" },
     { type: "heading2", text: "Commercial Decision Required" },
     { type: "text", text: commercialDecisionText(pipeline) },
-    { type: "table", rows: decisionRows },
+    ...rowsToBullets(decisionRows),
     { type: "divider" },
     { type: "heading2", text: "New Enterprise Opportunities" },
-    { type: "table", rows: newEnterpriseRows },
+    ...rowsToBullets(newEnterpriseRows),
     { type: "divider" },
     { type: "heading2", text: "Upcoming Enterprise Meetings" },
     { type: "text", text: "Calls we are excited about." },
-    { type: "table", rows: upcomingMeetingRows },
+    ...rowsToBullets(upcomingMeetingRows),
     { type: "divider" },
     { type: "heading2", text: "CMO Dinner Follow-ups" },
     { type: "text", text: "The dinner strategy continues to convert into qualified enterprise meetings." },
-    { type: "table", rows: dinnerRows },
+    ...rowsToBullets(dinnerRows),
     { type: "divider" },
     { type: "heading2", text: "CEO Takeaways" },
-    ...ceoTakeaways.map((text) => ({ type: "text" as const, text: `- ${text}` })),
+    ...ceoTakeaways.map((text) => ({ type: "bullet" as const, text })),
   ]);
 
   return {
@@ -174,6 +164,31 @@ export function buildCeoSalesReport({
     sheetValues: paragraphs.map((paragraph) => [paragraph]),
     plainText: paragraphs.join("\n\n"),
   };
+}
+
+function progressBlocks(lines: string[]): LarkReportBlock[] {
+  return lines.map((text) => {
+    if (text === "Agreement Stage" || text === "Hot Opportunities") {
+      return { type: "heading3", text };
+    }
+
+    if (text.startsWith("- ")) {
+      return { type: "bullet", text: text.slice(2) };
+    }
+
+    return { type: "text", text };
+  });
+}
+
+function rowsToBullets(rows: string[][]): LarkReportBlock[] {
+  const [header, ...body] = rows;
+
+  return body.map((row) => {
+    const [first, ...rest] = row;
+    const details = rest.filter(Boolean).join(" — ");
+    const text = details ? `${first}: ${details}` : first || header?.[0] || "";
+    return { type: "bullet", text };
+  });
 }
 
 function buildPipelineSet(deals: SalesDeal[], recentChanges: SalesMemoryChange[]): PipelineSet {

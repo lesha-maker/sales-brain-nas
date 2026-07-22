@@ -13,7 +13,9 @@ export type LarkDocumentContentBlock =
 export type LarkReportBlock =
   | { type: "heading1"; text: string }
   | { type: "heading2"; text: string }
+  | { type: "heading3"; text: string }
   | { type: "text"; text: string }
+  | { type: "bullet"; text: string }
   | { type: "table"; rows: string[][]; columnWidths?: number[] }
   | { type: "divider" };
 
@@ -327,6 +329,20 @@ function toLarkBlock(block: LarkReportBlock) {
     };
   }
 
+  if (block.type === "heading3") {
+    return {
+      block_type: 5,
+      heading3: textPayload(block.text),
+    };
+  }
+
+  if (block.type === "bullet") {
+    return {
+      block_type: 12,
+      bullet: textPayload(block.text),
+    };
+  }
+
   return {
     block_type: 2,
     text: textPayload(block.text),
@@ -432,8 +448,6 @@ async function appendLarkTable({
     throw new Error("Lark table did not return enough cell IDs to write values.");
   }
 
-  const writes: Array<Promise<void>> = [];
-
   for (let row = 0; row < rowSize; row += 1) {
     for (let column = 0; column < columnSize; column += 1) {
       const cellId = cells[row * columnSize + column];
@@ -441,12 +455,8 @@ async function appendLarkTable({
 
       if (!cellId || !value) continue;
 
-      writes.push(appendTextToBlock({ documentId, blockId: cellId, text: value }));
+      await appendTextToBlock({ documentId, blockId: cellId, text: value });
     }
-  }
-
-  for (const writesChunk of chunk(writes, 8)) {
-    await Promise.all(writesChunk);
   }
 }
 
