@@ -117,6 +117,41 @@ export async function createLarkDocument({ title }: { title: string }) {
   };
 }
 
+export async function grantLarkDocumentPermission({
+  token,
+  fileType = "docx",
+  memberType,
+  memberId,
+  permission = "edit",
+}: {
+  token: string;
+  fileType?: string;
+  memberType: "email" | "openid" | "userid" | "openchat";
+  memberId: string;
+  permission?: "view" | "edit" | "full_access";
+}) {
+  const payload = await larkRequest<{
+    member?: {
+      member_type?: string;
+      member_id?: string;
+      perm?: string;
+    };
+  }>(`/drive/v1/permissions/${encodeURIComponent(token)}/members?type=${encodeURIComponent(fileType)}`, {
+    method: "POST",
+    body: JSON.stringify({
+      member_type: memberType,
+      member_id: memberId,
+      perm: permission,
+    }),
+  });
+
+  return payload.member || {
+    member_type: memberType,
+    member_id: memberId,
+    perm: permission,
+  };
+}
+
 export async function getLarkWikiNode(token: string) {
   const payload = await larkRequest<{
     node?: {
