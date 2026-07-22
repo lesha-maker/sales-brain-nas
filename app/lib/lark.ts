@@ -17,6 +17,13 @@ export type LarkReportBlock =
   | { type: "table"; rows: string[][]; columnWidths?: number[] }
   | { type: "divider" };
 
+export type LarkWikiNode = {
+  objToken: string;
+  objType: string;
+  title: string;
+  url?: string;
+};
+
 async function getTenantAccessToken() {
   const appId = process.env.LARK_APP_ID;
   const appSecret = process.env.LARK_APP_SECRET;
@@ -107,6 +114,55 @@ export async function createLarkDocument({ title }: { title: string }) {
     title: document.title || title,
     url: document.url || larkDocumentUrl(document.document_id),
   };
+}
+
+export async function getLarkWikiNode(token: string) {
+  const payload = await larkRequest<{
+    node?: {
+      obj_token?: string;
+      obj_type?: string;
+      title?: string;
+      url?: string;
+    };
+  }>(`/wiki/v2/spaces/get_node?token=${encodeURIComponent(token)}`);
+  const node = payload.node;
+
+  if (!node?.obj_token || !node.obj_type) {
+    throw new Error("Lark returned no wiki obj_token.");
+  }
+
+  return {
+    objToken: node.obj_token,
+    objType: node.obj_type,
+    title: node.title || "",
+    url: node.url,
+  };
+}
+
+export async function getLarkDocumentMarkdown({
+  docToken,
+  docType = "docx",
+}: {
+  docToken: string;
+  docType?: string;
+}) {
+  const payload = await larkRequest<{
+    content?: string;
+  }>(
+    `/docs/v1/content?doc_token=${encodeURIComponent(docToken)}&doc_type=${encodeURIComponent(
+      docType,
+    )}&content_type=markdown&lang=en`,
+  );
+
+  return payload.content || "";
+}
+
+export async function getLarkDocumentRawContent(documentId: string) {
+  const payload = await larkRequest<{
+    content?: string;
+  }>(`/docx/v1/documents/${documentId}/raw_content`);
+
+  return payload.content || "";
 }
 
 export async function createLarkSpreadsheet({ title }: { title: string }) {
