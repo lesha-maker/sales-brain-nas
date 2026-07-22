@@ -20,9 +20,7 @@ export async function createTwiceWeeklySalesReport({
   sendToChat?: boolean;
 }) {
   const boardIds = getConfiguredSalesBoardIds();
-  const snapshot = boardIds.length
-    ? await crawlSalesMemory(boardIds)
-    : await getLatestSalesMemory();
+  const snapshot = (await getLatestSalesMemory()) || (boardIds.length ? await crawlSalesMemory(boardIds) : null);
 
   if (!snapshot) {
     throw new Error("No Sales Brain memory snapshot has been crawled yet.");
