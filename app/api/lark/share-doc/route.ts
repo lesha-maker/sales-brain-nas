@@ -13,12 +13,19 @@ type ShareDocRequest = {
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as ShareDocRequest;
   const token = body.token || tokenFromUrl(body.url || "");
+  const memberType = body.memberType || "openchat";
+  const memberId =
+    body.memberId ||
+    (memberType === "openchat"
+      ? process.env.LARK_SALES_REPORT_CHAT_ID || process.env.LARK_SALES_CHAT_ID
+      : "");
 
-  if (!token || !body.memberType || !body.memberId) {
+  if (!token || !memberType || !memberId) {
     return NextResponse.json(
       {
         ok: false,
-        error: "Send token/url, memberType, and memberId.",
+        error:
+          "Send token/url and memberId, or configure LARK_SALES_REPORT_CHAT_ID/LARK_SALES_CHAT_ID for openchat sharing.",
       },
       { status: 400 },
     );
@@ -28,8 +35,8 @@ export async function POST(request: NextRequest) {
     const member = await grantLarkDocumentPermission({
       token,
       fileType: body.fileType || "docx",
-      memberType: body.memberType,
-      memberId: body.memberId,
+      memberType,
+      memberId,
       permission: body.permission || "edit",
     });
 
