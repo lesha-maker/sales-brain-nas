@@ -234,6 +234,11 @@ function isAgreementStageUpdateIntent(
   conversation: ConversationMessage[],
 ) {
   const normalized = question.toLowerCase();
+
+  if (isReadOnlySalesQuestion(normalized)) {
+    return false;
+  }
+
   const recentUserText = conversation
     .filter((message) => message.role === "user")
     .slice(-3)
@@ -246,11 +251,26 @@ function isAgreementStageUpdateIntent(
   const currentMessageHasUpdateVerb = /\b(move|update|change|set|put)\b/.test(normalized);
   const recentMessageHadUpdateVerb = /\b(move|update|change|set|put)\b/.test(recentUserText);
   const currentMessageLooksLikeSelection = searchTokens(normalized).length > 0;
+  const currentMessageLooksShort = searchTokens(normalized).length <= 3;
 
   return (
     mentionsAgreement &&
-    (currentMessageHasUpdateVerb || (recentMessageHadUpdateVerb && currentMessageLooksLikeSelection))
+    (currentMessageHasUpdateVerb ||
+      (recentMessageHadUpdateVerb && currentMessageLooksLikeSelection && currentMessageLooksShort))
   );
+}
+
+function isReadOnlySalesQuestion(normalized: string) {
+  const asksForAnswer =
+    /\b(how many|what|which|who|where|when|why|list|show|tell|give|get|report|count|summary|update on)\b/.test(
+      normalized,
+    );
+  const asksAboutSales =
+    /\b(lead|leads|sql|qualified|inbound|outbound|call|calls|meeting|meetings|pipeline|crm|sales)\b/.test(
+      normalized,
+    );
+
+  return asksForAnswer && asksAboutSales;
 }
 
 function findDealMatches({

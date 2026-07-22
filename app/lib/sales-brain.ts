@@ -92,6 +92,8 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
     .sort((a, b) => b.value * b.probability - a.value * a.probability)
     .slice(0, 5);
   const salesQualified = deals.filter((deal) => deal.callStage === "Sales Qualified");
+  const inboundSalesQualified = salesQualified.filter((deal) => !isOutbound(deal));
+  const outboundSalesQualified = salesQualified.filter(isOutbound);
   const upcomingCalls = upcomingBookedMeetings(deals);
 
   if (normalized.includes("stuck") || normalized.includes("risk")) {
@@ -102,6 +104,14 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
           `- ${deal.account}: ${deal.callStage || deal.stage}, ${deal.budget}, owner ${deal.owner}, next step: ${deal.nextStep}`,
       ),
     ].join("\n");
+  }
+
+  if (asksAboutInboundQualifiedLeads(normalized)) {
+    return `We have ${inboundSalesQualified.length} inbound sales qualified leads right now.`;
+  }
+
+  if (asksAboutOutboundQualifiedLeads(normalized)) {
+    return `We have ${outboundSalesQualified.length} outbound sales qualified leads right now.`;
   }
 
   if (normalized.includes("sales qualified")) {
@@ -237,6 +247,14 @@ function buildCrmSummary(
     deals.filter((deal) => deal.callStage === "Sales Qualified"),
     20,
   );
+  const inboundSalesQualified = topDeals(
+    deals.filter((deal) => deal.callStage === "Sales Qualified" && !isOutbound(deal)),
+    20,
+  );
+  const outboundSalesQualified = topDeals(
+    deals.filter((deal) => deal.callStage === "Sales Qualified" && isOutbound(deal)),
+    20,
+  );
   const upcomingCalls = topDeals(upcomingBookedMeetings(deals), 20);
   const lateStageClosing = topDeals(
     deals.filter((deal) =>
@@ -275,6 +293,14 @@ function buildCrmSummary(
     topReview,
     topNotFit,
     salesQualified,
+    inboundSalesQualified,
+    outboundSalesQualified,
+    inboundSalesQualifiedCount: deals.filter(
+      (deal) => deal.callStage === "Sales Qualified" && !isOutbound(deal),
+    ).length,
+    outboundSalesQualifiedCount: deals.filter(
+      (deal) => deal.callStage === "Sales Qualified" && isOutbound(deal),
+    ).length,
     upcomingCalls,
     upcomingCallsDefinition:
       "callStage is Booked a Meeting and firstMeetingDate is today or later in Asia/Singapore",
@@ -413,6 +439,26 @@ function asksAboutUpcomingCalls(normalizedQuestion: string) {
     /\b(upcoming|coming up|booked|scheduled|today|tomorrow|next)\b/.test(normalizedQuestion);
 
   return mentionsCall && mentionsUpcoming;
+}
+
+function asksAboutInboundQualifiedLeads(normalizedQuestion: string) {
+  return (
+    /\binbound\b/.test(normalizedQuestion) &&
+    /\b(qualified|sql|sales qualified)\b/.test(normalizedQuestion) &&
+    /\b(lead|leads|records|clients)\b/.test(normalizedQuestion)
+  );
+}
+
+function asksAboutOutboundQualifiedLeads(normalizedQuestion: string) {
+  return (
+    /\boutbound\b/.test(normalizedQuestion) &&
+    /\b(qualified|sql|sales qualified)\b/.test(normalizedQuestion) &&
+    /\b(lead|leads|records|clients)\b/.test(normalizedQuestion)
+  );
+}
+
+function isOutbound(deal: SalesDeal) {
+  return deal.source?.toLowerCase().includes("outbound") || false;
 }
 
 function upcomingBookedMeetings(deals: SalesDeal[]) {
