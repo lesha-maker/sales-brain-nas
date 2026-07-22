@@ -225,7 +225,7 @@ function pipelineSnapshotRows(pipeline: PipelineSet) {
   const maxRows = Math.max(...columns.map((column) => column.length), 1);
   const rows = [["Signed", "Agreement Stage", "Hot", "Worth a Second Call"]];
 
-  for (let index = 0; index < Math.min(maxRows, 14); index += 1) {
+  for (let index = 0; index < Math.min(maxRows, 8); index += 1) {
     rows.push([
       snapshotCell(pipeline.signed[index]),
       snapshotCell(pipeline.agreement[index]),
