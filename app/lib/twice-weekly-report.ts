@@ -43,6 +43,8 @@ export async function createTwiceWeeklySalesReport({
   const document = await createLarkDocument({
     title: `Sales Pulse - ${report.title.replace(/^CEO Sales Brief -\s*/, "")}`,
   });
+  let writeMode = "text-blocks";
+  let writeError = "";
 
   if (process.env.SALES_BRAIN_USE_LARK_TABLE_BLOCKS !== "false") {
     try {
@@ -50,7 +52,9 @@ export async function createTwiceWeeklySalesReport({
         documentId: document.documentId,
         blocks: report.blocks,
       });
-    } catch {
+      writeMode = "rich-blocks";
+    } catch (error) {
+      writeError = error instanceof Error ? error.message : "Rich Lark blocks failed.";
       await appendLarkDocumentTextBlocks({
         documentId: document.documentId,
         paragraphs: report.paragraphs,
@@ -76,6 +80,8 @@ export async function createTwiceWeeklySalesReport({
   return {
     ok: true,
     document,
+    writeMode,
+    writeError,
     boards: snapshot.boards || [snapshot.board],
     reportPreview: report.plainText.slice(0, 2000),
   };

@@ -130,7 +130,7 @@ export function buildCeoSalesReport({
     { type: "heading2", text: "Pipeline Health" },
     { type: "heading3", text: `Overall Health: ${health}` },
     { type: "text", text: "Key highlights" },
-    ...keyHighlights.map((text) => ({ type: "bullet" as const, text })),
+    ...keyHighlights.map((text) => ({ type: "text" as const, text: `- ${text}` })),
     { type: "divider" },
     { type: "heading2", text: "Enterprise Pipeline Snapshot" },
     { type: "table", rows: snapshotRows },
@@ -154,7 +154,7 @@ export function buildCeoSalesReport({
     ...rowsToBullets(dinnerRows),
     { type: "divider" },
     { type: "heading2", text: "CEO Takeaways" },
-    ...ceoTakeaways.map((text) => ({ type: "bullet" as const, text })),
+    ...ceoTakeaways.map((text) => ({ type: "text" as const, text: `- ${text}` })),
   ]);
 
   return {
@@ -173,7 +173,7 @@ function progressBlocks(lines: string[]): LarkReportBlock[] {
     }
 
     if (text.startsWith("- ")) {
-      return { type: "bullet", text: text.slice(2) };
+      return { type: "text", text };
     }
 
     return { type: "text", text };
@@ -187,7 +187,7 @@ function rowsToBullets(rows: string[][]): LarkReportBlock[] {
     const [first, ...rest] = row;
     const details = rest.filter(Boolean).join(" — ");
     const text = details ? `${first}: ${details}` : first || header?.[0] || "";
-    return { type: "bullet", text };
+    return { type: "text", text: `- ${text}` };
   });
 }
 

@@ -15,7 +15,6 @@ export type LarkReportBlock =
   | { type: "heading2"; text: string }
   | { type: "heading3"; text: string }
   | { type: "text"; text: string }
-  | { type: "bullet"; text: string }
   | { type: "table"; rows: string[][]; columnWidths?: number[] }
   | { type: "divider" };
 
@@ -336,16 +335,9 @@ function toLarkBlock(block: LarkReportBlock) {
     };
   }
 
-  if (block.type === "bullet") {
-    return {
-      block_type: 12,
-      bullet: textPayload(block.text),
-    };
-  }
-
   return {
     block_type: 2,
-    text: textPayload(block.text),
+    text: textPayload(block.type === "text" ? block.text : `- ${block.text}`),
   };
 }
 
