@@ -166,6 +166,48 @@ export async function getLarkDocumentRawContent(documentId: string) {
   return payload.content || "";
 }
 
+export async function testLarkDocumentEditAccess(documentId: string) {
+  const marker = `Sales Brain edit access test ${new Date().toISOString()}`;
+  const createPayload = await larkRequest<{
+    children?: Array<{
+      block_id?: string;
+      block_type?: number;
+    }>;
+  }>(`/docx/v1/documents/${documentId}/blocks/${documentId}/children`, {
+    method: "POST",
+    body: JSON.stringify({
+      index: 0,
+      children: [
+        {
+          block_type: 2,
+          text: textPayload(marker),
+        },
+      ],
+    }),
+  });
+  const blockId = createPayload.children?.[0]?.block_id;
+
+  if (!blockId) {
+    throw new Error("Lark did not return an edit-test block ID.");
+  }
+
+  await larkRequest(
+    `/docx/v1/documents/${documentId}/blocks/${documentId}/children/batch_delete`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({
+        start_index: 0,
+        end_index: 1,
+      }),
+    },
+  );
+
+  return {
+    createdBlockId: blockId,
+    deleted: true,
+  };
+}
+
 export async function createLarkSpreadsheet({ title }: { title: string }) {
   const payload = await larkRequest<{
     spreadsheet?: {

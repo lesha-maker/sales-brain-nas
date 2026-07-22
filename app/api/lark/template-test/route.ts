@@ -3,11 +3,13 @@ import {
   getLarkDocumentMarkdown,
   getLarkDocumentRawContent,
   getLarkWikiNode,
+  testLarkDocumentEditAccess,
 } from "../../../lib/lark";
 
 type TemplateTestRequest = {
   token?: string;
   url?: string;
+  testEdit?: boolean;
 };
 
 export async function POST(request: NextRequest) {
@@ -40,6 +42,10 @@ export async function POST(request: NextRequest) {
     result.readMethod = "wiki -> docs markdown";
     result.markdownPreview = markdown.slice(0, 4000);
     result.markdownLength = markdown.length;
+
+    if (body.testEdit) {
+      result.editTest = await testLarkDocumentEditAccess(node.objToken);
+    }
 
     return NextResponse.json(result);
   } catch (wikiError) {
