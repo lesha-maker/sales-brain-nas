@@ -4,6 +4,7 @@ import { createTwiceWeeklySalesReport } from "../../../lib/twice-weekly-report";
 type ReportRequest = {
   chatId?: string;
   sendToChat?: boolean;
+  previewOnly?: boolean;
 };
 
 export async function POST(request: NextRequest) {
@@ -13,6 +14,7 @@ export async function POST(request: NextRequest) {
     const result = await createTwiceWeeklySalesReport({
       chatId: body.chatId,
       sendToChat: body.sendToChat !== false,
+      previewOnly: body.previewOnly === true,
     });
 
     return NextResponse.json(result);

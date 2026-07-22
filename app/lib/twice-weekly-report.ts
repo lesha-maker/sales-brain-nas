@@ -15,9 +15,11 @@ import {
 export async function createTwiceWeeklySalesReport({
   chatId,
   sendToChat = true,
+  previewOnly = false,
 }: {
   chatId?: string;
   sendToChat?: boolean;
+  previewOnly?: boolean;
 }) {
   const boardIds = getConfiguredSalesBoardIds();
   const snapshot = (await getLatestSalesMemory()) || (boardIds.length ? await crawlSalesMemory(boardIds) : null);
@@ -28,6 +30,16 @@ export async function createTwiceWeeklySalesReport({
 
   const recentChanges = await getRecentSalesMemoryChanges(180);
   const report = buildCeoSalesReport({ snapshot, recentChanges });
+
+  if (previewOnly) {
+    return {
+      ok: true,
+      document: null,
+      boards: snapshot.boards || [snapshot.board],
+      reportPreview: report.plainText.slice(0, 8000),
+    };
+  }
+
   const document = await createLarkDocument({
     title: `Sales Pulse - ${report.title.replace(/^CEO Sales Brief -\s*/, "")}`,
   });
