@@ -240,29 +240,34 @@ export async function appendLarkReportBlocks({
   let index = 0;
 
   for (const block of blocks) {
-    if (block.type === "table") {
-      await appendLarkTable({
-        documentId,
-        rows: block.rows,
-        columnWidths: block.columnWidths,
-        index,
-      });
-      index += 1;
-      continue;
-    }
-
-    await larkRequest(
-      `/docx/v1/documents/${documentId}/blocks/${documentId}/children`,
-      {
-        method: "POST",
-        body: JSON.stringify({
+    try {
+      if (block.type === "table") {
+        await appendLarkTable({
+          documentId,
+          rows: block.rows,
+          columnWidths: block.columnWidths,
           index,
-          children: [toLarkBlock(block)],
-        }),
-      },
-    );
+        });
+        index += 1;
+        continue;
+      }
 
-    index += 1;
+      await larkRequest(
+        `/docx/v1/documents/${documentId}/blocks/${documentId}/children`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            index,
+            children: [toLarkBlock(block)],
+          }),
+        },
+      );
+
+      index += 1;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Lark rejected ${block.type} block at index ${index}: ${message}`);
+    }
   }
 }
 
