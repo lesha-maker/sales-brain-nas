@@ -135,7 +135,7 @@ async function loadSalesBoardDeals() {
 
   const memory = await getLatestSalesMemory();
 
-  if (memory?.deals.length) {
+  if (memory?.deals.length && memory.deals.some((deal) => deal.group)) {
     return { boardId, deals: memory.deals };
   }
 

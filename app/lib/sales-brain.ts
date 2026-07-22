@@ -458,6 +458,7 @@ function asksAboutOutboundQualifiedLeads(normalizedQuestion: string) {
 }
 
 function isOutbound(deal: SalesDeal) {
+  if (deal.group) return deal.group === "Outbound Leads";
   return deal.source?.toLowerCase().includes("outbound") || false;
 }
 
@@ -535,6 +536,7 @@ function topDeals(deals: SalesDeal[], limit: number) {
     .slice(0, limit)
     .map((deal) => ({
       account: deal.account,
+      group: deal.group,
       owner: deal.owner,
       email: deal.email,
       stage: deal.stage,

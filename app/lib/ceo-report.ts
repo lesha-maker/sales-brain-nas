@@ -397,6 +397,7 @@ function uniqueDeals(deals: SalesDeal[]) {
 }
 
 function isOutbound(deal: SalesDeal) {
+  if (deal.group) return deal.group === "Outbound Leads";
   return deal.source?.toLowerCase().includes("outbound") || false;
 }
 

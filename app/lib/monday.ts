@@ -3,6 +3,7 @@ const MONDAY_API_URL = "https://api.monday.com/v2";
 export type SalesDeal = {
   id: string;
   account: string;
+  group?: string;
   owner: string;
   stage: string;
   qualification: string;
@@ -338,6 +339,7 @@ function normalizeDeals(board: {
     return {
       id: item.id,
       account: item.name,
+      group: item.group?.title || "Unknown",
       owner: valueFor(columns.owner) || "Unassigned",
       stage,
       qualification,
