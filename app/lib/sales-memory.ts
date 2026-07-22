@@ -54,7 +54,20 @@ export type PendingMondayAction = {
   account: string;
   email: string;
   description: string;
-  columnValues: Record<string, unknown>;
+  columnValues?: Record<string, unknown>;
+  updateBody?: string;
+};
+
+export type SalesContextNote = {
+  id: string;
+  createdAt: string;
+  threadId: string;
+  source: "lark";
+  rawText: string;
+  note: string;
+  account?: string;
+  itemId?: string;
+  email?: string;
 };
 
 const trackedFields: Array<keyof SalesDeal> = [
@@ -170,6 +183,34 @@ export async function clearPendingMondayAction(threadId: string) {
   try {
     await unlink(pendingActionPath(threadId));
   } catch {}
+}
+
+export async function appendSalesContextNote(note: Omit<SalesContextNote, "id" | "createdAt">) {
+  const entry: SalesContextNote = {
+    ...note,
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    createdAt: new Date().toISOString(),
+  };
+
+  const dir = memoryDir();
+  await mkdir(dir, { recursive: true });
+  await appendFile(memoryPath("sales-context-notes.jsonl"), `${JSON.stringify(entry)}\n`);
+
+  return entry;
+}
+
+export async function getSalesContextNotes(limit = 80) {
+  try {
+    const raw = await readFile(memoryPath("sales-context-notes.jsonl"), "utf8");
+    return raw
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .slice(-limit)
+      .map((line) => JSON.parse(line) as SalesContextNote);
+  } catch {
+    return [];
+  }
 }
 
 export async function registerLarkMessageDelivery(messageId: string) {

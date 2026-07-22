@@ -9,10 +9,12 @@ import { replyToLarkMessage, sendLarkTextReport } from "../../../lib/lark";
 import { answerSalesQuestion } from "../../../lib/sales-brain";
 import {
   appendConversationMemory,
+  appendSalesContextNote,
   clearPendingMondayAction,
   getConversationMemory,
   getLatestSalesMemory,
   getPendingMondayAction,
+  getSalesContextNotes,
   registerLarkMessageDelivery,
   setPendingMondayAction,
   type ConversationMessage,
@@ -84,6 +86,7 @@ export async function POST(request: NextRequest) {
   const threadId = conversationThreadId(message);
   const conversation = await getConversationMemory(threadId);
   const boardData = await loadSalesBoardDeals();
+  const contextNotes = await getSalesContextNotes();
   const answer =
     (await maybeHandleMondayWrite({
       question,
@@ -92,10 +95,17 @@ export async function POST(request: NextRequest) {
       deals: boardData.deals,
       conversation,
     })) ||
+    (await maybeHandleSalesMemoryCapture({
+      question,
+      threadId,
+      boardId: boardData.boardId,
+      deals: boardData.deals,
+    })) ||
     (await answerSalesQuestion({
       question,
       deals: boardData.deals,
       conversation,
+      contextNotes,
     }));
 
   if (message.chat_id) {
@@ -178,15 +188,19 @@ async function maybeHandleMondayWrite({
       return "";
     }
 
-    await changeDealColumns({
-      boardId: action.boardId,
-      itemId: action.itemId,
-      columnValues: action.columnValues,
-    });
+    if (action.columnValues && Object.keys(action.columnValues).length) {
+      await changeDealColumns({
+        boardId: action.boardId,
+        itemId: action.itemId,
+        columnValues: action.columnValues,
+      });
+    }
 
     await createDealUpdate({
       itemId: action.itemId,
-      body: `Sales Brain updated ${action.description} after explicit Lark approval.`,
+      body:
+        action.updateBody ||
+        `Sales Brain updated ${action.description} after explicit Lark approval.`,
     });
 
     await clearPendingMondayAction(threadId);
@@ -237,11 +251,92 @@ async function maybeHandleMondayWrite({
   return `I found ${deal.account}${email}.${stageText} Reply yes to confirm, and I'll move it to Agreement Stage in monday.`;
 }
 
+async function maybeHandleSalesMemoryCapture({
+  question,
+  threadId,
+  boardId,
+  deals,
+}: {
+  question: string;
+  threadId: string;
+  boardId: string;
+  deals: SalesDeal[];
+}) {
+  if (!isSalesMemoryCaptureIntent(question)) return "";
+
+  const matches = findDealMatches({ question, conversation: [], deals }).slice(0, 5);
+  const note = extractSalesMemoryNote(question);
+
+  if (!matches.length) {
+    await appendSalesContextNote({
+      threadId,
+      source: "lark",
+      rawText: question,
+      note,
+    });
+
+    return "Got it - I saved this in Sales Brain memory, but I could not confidently match it to a monday lead yet. Add the company name or email if you want me to attach it to a CRM record.";
+  }
+
+  if (matches.length > 1) {
+    const names = matches.map(formatDealOption).join("; ");
+    return `I found multiple possible CRM records for this note: ${names}. Which one should I attach it to?`;
+  }
+
+  const deal = matches[0];
+  const saved = await appendSalesContextNote({
+    threadId,
+    source: "lark",
+    rawText: question,
+    note,
+    account: deal.account,
+    itemId: deal.id,
+    email: deal.email,
+  });
+
+  await setPendingMondayAction(threadId, {
+    id: saved.id,
+    createdAt: saved.createdAt,
+    boardId,
+    itemId: deal.id,
+    account: deal.account,
+    email: deal.email,
+    description: "added Sales Brain context note to monday",
+    updateBody: `Sales Brain context from Lark:\n\n${note}`,
+  });
+
+  const email = deal.email ? ` (${deal.email})` : "";
+  return `Got it - I saved this to Sales Brain memory for ${deal.account}${email}. Reply yes if you also want me to add it as a monday update.`;
+}
+
 function isConfirmation(question: string) {
   const normalized = question.trim().toLowerCase();
   return /^(yes|yes pls|yes please|yep|yeah|confirm|approved|approve|do it|go ahead|ok|okay)$/i.test(
     normalized,
   );
+}
+
+function isSalesMemoryCaptureIntent(question: string) {
+  const normalized = question.toLowerCase();
+  const hasMemoryVerb =
+    /\b(remember|note|memorize|save|store|context|add to sales brain|add to crm|update crm|crm note|sales note)\b/.test(
+      normalized,
+    );
+  const hasSalesSubject =
+    /\b(lead|client|customer|deal|sales|crm|monday|proposal|pricing|budget|decision maker|objection|next step|follow up|agreement|close|closing)\b/.test(
+      normalized,
+    );
+
+  return hasMemoryVerb && hasSalesSubject;
+}
+
+function extractSalesMemoryNote(question: string) {
+  return question
+    .replace(
+      /^\s*(remember|note|memorize|save|store|context|add to sales brain|add to crm|update crm|crm note|sales note)\s*(this|that|for)?\s*[:,-]?\s*/i,
+      "",
+    )
+    .trim();
 }
 
 function isAgreementStageUpdateIntent(

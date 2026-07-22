@@ -1,10 +1,11 @@
 import type { SalesDeal } from "./monday";
-import type { ConversationMessage } from "./sales-memory";
+import type { ConversationMessage, SalesContextNote } from "./sales-memory";
 
 type BrainAnswerInput = {
   question: string;
   deals: SalesDeal[];
   conversation?: ConversationMessage[];
+  contextNotes?: SalesContextNote[];
 };
 
 type StageSummary = {
@@ -20,7 +21,12 @@ const formatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 
-export async function answerSalesQuestion({ question, deals, conversation = [] }: BrainAnswerInput) {
+export async function answerSalesQuestion({
+  question,
+  deals,
+  conversation = [],
+  contextNotes = [],
+}: BrainAnswerInput) {
   const fallback = deterministicSalesAnswer(question, deals);
   const directAnswer = directSpecificLeadAnswer({ question, deals, conversation });
 
@@ -33,7 +39,9 @@ export async function answerSalesQuestion({ question, deals, conversation = [] }
   }
 
   try {
-    return cleanLarkAnswer(await askOpenAI({ question, deals, conversation, fallback }));
+    return cleanLarkAnswer(
+      await askOpenAI({ question, deals, conversation, contextNotes, fallback }),
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "OpenAI request failed.";
     return cleanLarkAnswer(`${fallback}\n\nOpenAI analysis was unavailable: ${message}`);
@@ -148,6 +156,7 @@ async function askOpenAI({
   question,
   deals,
   conversation = [],
+  contextNotes = [],
   fallback,
 }: BrainAnswerInput & { fallback: string }) {
   const model = process.env.OPENAI_MODEL || "gpt-5.6-terra";
@@ -199,6 +208,11 @@ async function askOpenAI({
                   question,
                   recentConversation: conversation.slice(-8),
                   matchingCrmRecordsForThisQuestion: relevantDeals,
+                  salesBrainContextNotes: relevantContextNotes({
+                    notes: contextNotes,
+                    question,
+                    deals: relevantDeals,
+                  }),
                   crmSummary: buildCrmSummary(deals, question, conversation),
                   deterministicBaseline: fallback,
                 },
@@ -332,6 +346,38 @@ function findRelevantDeals(
     .sort((a, b) => b.score - a.score)
     .slice(0, 20)
     .map((item) => item.deal);
+}
+
+function relevantContextNotes({
+  notes,
+  question,
+  deals,
+}: {
+  notes: SalesContextNote[];
+  question: string;
+  deals: Array<Pick<SalesDeal, "account" | "email" | "id">>;
+}) {
+  const tokens = searchTokens(
+    [
+      question,
+      ...deals.flatMap((deal) => [deal.account, deal.email, deal.id]),
+    ].join(" "),
+  );
+
+  if (!tokens.length) return notes.slice(-8);
+
+  return notes
+    .map((note) => {
+      const searchable = normalizeSearch(
+        [note.account, note.email, note.itemId, note.note, note.rawText].filter(Boolean).join(" "),
+      );
+      const score = tokens.reduce((sum, token) => sum + (searchable.includes(token) ? 1 : 0), 0);
+      return { note, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10)
+    .map((item) => item.note);
 }
 
 function relevanceScore(deal: SalesDeal, tokens: string[]) {
