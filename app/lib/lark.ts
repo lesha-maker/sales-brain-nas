@@ -397,9 +397,11 @@ async function appendLarkTable({
 export async function replyToLarkMessage({
   messageId,
   text,
+  replyInThread = false,
 }: {
   messageId: string;
   text: string;
+  replyInThread?: boolean;
 }) {
   const token = await getTenantAccessToken();
   const response = await fetch(`${LARK_BASE_URL}/im/v1/messages/${messageId}/reply`, {
@@ -411,7 +413,7 @@ export async function replyToLarkMessage({
     body: JSON.stringify({
       msg_type: "text",
       content: JSON.stringify({ text }),
-      reply_in_thread: true,
+      reply_in_thread: replyInThread,
     }),
   });
 

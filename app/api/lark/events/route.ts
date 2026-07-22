@@ -5,7 +5,7 @@ import {
   getBoardSnapshot,
   type SalesDeal,
 } from "../../../lib/monday";
-import { replyToLarkMessage } from "../../../lib/lark";
+import { replyToLarkMessage, sendLarkTextReport } from "../../../lib/lark";
 import { answerSalesQuestion } from "../../../lib/sales-brain";
 import {
   appendConversationMemory,
@@ -13,6 +13,7 @@ import {
   getConversationMemory,
   getLatestSalesMemory,
   getPendingMondayAction,
+  registerLarkMessageDelivery,
   setPendingMondayAction,
   type ConversationMessage,
 } from "../../../lib/sales-memory";
@@ -73,6 +74,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, ignored: "non-text-message" });
   }
 
+  const isFirstDelivery = await registerLarkMessageDelivery(messageId);
+
+  if (!isFirstDelivery) {
+    return NextResponse.json({ ok: true, ignored: "duplicate-message" });
+  }
+
   const question = parseTextContent(message.content);
   const threadId = conversationThreadId(message);
   const conversation = await getConversationMemory(threadId);
@@ -91,10 +98,18 @@ export async function POST(request: NextRequest) {
       conversation,
     }));
 
-  await replyToLarkMessage({
-    messageId,
-    text: answer,
-  });
+  if (message.chat_id) {
+    await sendLarkTextReport({
+      chatId: message.chat_id,
+      text: answer,
+    });
+  } else {
+    await replyToLarkMessage({
+      messageId,
+      text: answer,
+      replyInThread: false,
+    });
+  }
 
   await appendConversationMemory({
     threadId,

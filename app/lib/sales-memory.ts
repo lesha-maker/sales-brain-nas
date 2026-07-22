@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile, appendFile, unlink } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile, appendFile, unlink, open } from "node:fs/promises";
 import path from "node:path";
 import type { SalesDeal } from "./monday";
 import { getBoardSnapshot } from "./monday";
@@ -170,6 +170,31 @@ export async function clearPendingMondayAction(threadId: string) {
   try {
     await unlink(pendingActionPath(threadId));
   } catch {}
+}
+
+export async function registerLarkMessageDelivery(messageId: string) {
+  const dir = path.join(memoryDir(), "processed-lark-messages");
+  await mkdir(dir, { recursive: true });
+
+  const filePath = path.join(dir, `${safeFileName(messageId)}.json`);
+
+  try {
+    const file = await open(filePath, "wx");
+    await file.writeFile(
+      JSON.stringify({
+        messageId,
+        processedAt: new Date().toISOString(),
+      }),
+    );
+    await file.close();
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+      return false;
+    }
+
+    throw error;
+  }
 }
 
 async function crawlAndStore(boardId: string) {
