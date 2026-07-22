@@ -2,6 +2,18 @@ import type { SalesDeal } from "./monday";
 import type { SalesMemoryChange, SalesMemorySnapshot } from "./sales-memory";
 import type { LarkReportBlock } from "./lark";
 
+type PipelineSet = {
+  signed: SalesDeal[];
+  agreement: SalesDeal[];
+  hot: SalesDeal[];
+  worthSecondCall: SalesDeal[];
+  upcomingMeetings: SalesDeal[];
+  dinnerFollowUps: SalesDeal[];
+  newEnterprise: SalesDeal[];
+  feeConcern: SalesDeal[];
+  activeEnterpriseCount: number;
+};
+
 export function buildCeoSalesReport({
   snapshot,
   recentChanges,
@@ -17,145 +29,142 @@ export function buildCeoSalesReport({
     timeStyle: "short",
   }).format(generatedAt);
   const title = `CEO Sales Brief - ${reportTime}`;
-  const signed = topByStage(deals, (deal) => deal.finalVerdict === "Completed", 4);
-  const agreement = topByStage(deals, (deal) => deal.finalVerdict === "Agreement Stage", 5);
-  const hot = highProbabilityDeals(deals).slice(0, 5);
-  const watch = watchListDeals(deals).slice(0, 5);
-  const upcomingCalls = upcomingBookedMeetings(deals);
+  const pipeline = buildPipelineSet(deals, recentChanges);
   const movement = movementSinceLastReport(recentChanges);
-  const activeUnassigned = deals.filter(
-    (deal) => cleanOwner(deal.owner) === "Unassigned" && scoreDeal(deal) >= 50,
-  );
-  const inbound = deals.filter((deal) => !isOutbound(deal));
-  const outbound = deals.filter(isOutbound);
-  const newSignals = newLeadSignals(deals, recentChanges).slice(0, 5);
-  const signedCount = deals.filter((deal) => deal.finalVerdict === "Completed").length;
-  const inboundSqls = countWhere(inbound, (deal) => deal.callStage === "Sales Qualified");
-  const outboundSqls = countWhere(outbound, (deal) => deal.callStage === "Sales Qualified");
-  const bottomLine = `Sales has ${agreement.length} deals in agreement stage, ${hot.length} high-probability opportunities, and ${upcomingCalls.length} booked calls coming up. The biggest thing to watch is ownership: ${activeUnassigned.length} active opportunities are still unassigned.`;
-  const movedToAgreement = `Moved to agreement: ${movement.agreementMoves.length ? listNames(movement.agreementMoves) : "none"}.`;
-  const newAndNegative = `New records added: ${movement.createdCount}. Losses/no-shows: ${movement.negativeCount}.`;
-  const importantChanges = movement.important.length
-    ? `Important changes: ${movement.important.slice(0, 4).map(formatChange).join("; ")}.`
-    : "Important changes: no major stage movement outside the closing list.";
-  const inboundShape = `Inbound: ${inbound.length.toLocaleString()} records, ${countWhere(
-    inbound,
-    (deal) => deal.callStage === "Sales Qualified",
-  )} sales qualified, ${countWhere(inbound, (deal) => deal.callStage === "Booked a Meeting")} booked calls.`;
-  const outboundShape = `Outbound: ${outbound.length.toLocaleString()} records, ${countWhere(
-    outbound,
-    (deal) => deal.callStage === "Sales Qualified",
-  )} sales qualified, ${countWhere(outbound, (deal) => deal.callStage === "Booked a Meeting")} booked calls.`;
-  const newSignalLines = newSignals.length
-    ? dealLines(newSignals)
-    : ["No new high-signal leads found in the latest CRM changes."];
-  const summaryRows = [
-    ["Metric", "Current Value"],
-    ["Total CRM Records", deals.length.toLocaleString()],
-    ["Inbound SQLs", String(inboundSqls)],
-    ["Outbound SQLs", String(outboundSqls)],
-    ["Agreement Stage", String(agreement.length)],
-    ["High-Probability / Hot", String(hot.length)],
-    ["Upcoming Booked Calls", String(upcomingCalls.length)],
-    ["Completed Deals", String(signedCount)],
-    ["New Records This Week", String(movement.createdCount)],
-    ["Moved To Agreement This Week", String(movement.agreementMoves.length)],
-    ["Lost / No-Show Movement", String(movement.negativeCount)],
-    ["Unassigned Active Opportunities", String(activeUnassigned.length)],
+  const dinnerMarkets = groupDinnerFollowUps(pipeline.dinnerFollowUps);
+  const newCeoLevel = pipeline.newEnterprise.filter(isMillionPlusLead).slice(0, 2);
+  const newMeetingCount = pipeline.upcomingMeetings.length;
+  const agreementMoveCount = movement.agreementMoves.length || pipeline.agreement.length;
+  const health = pipeline.agreement.length + pipeline.hot.length >= 8 ? "Strong" : "Needs focus";
+
+  const executiveSummary =
+    `This week we moved ${agreementMoveCount} opportunities into agreement stage, ` +
+    `have ${pipeline.hot.length} hot opportunities requiring follow-up, added ` +
+    `${newCeoLevel.length} CEO-level opportunities, and generated ` +
+    `${pipeline.dinnerFollowUps.length} qualified follow-up meetings from CMO dinners.`;
+
+  const pipelineHealthRows = [
+    ["Overall Health", health],
+    ["Agreement Stage", String(pipeline.agreement.length)],
+    ["Hot Opportunities", String(pipeline.hot.length)],
+    ["Worth a Second Call", String(pipeline.worthSecondCall.length)],
+    ["Upcoming Enterprise Meetings", String(newMeetingCount)],
+    ["CMO Dinner Follow-ups", String(pipeline.dinnerFollowUps.length)],
+    ["Active Late-stage Opportunities", String(pipeline.activeEnterpriseCount)],
   ];
-  const closingRows = closingBoardRows({
-    signed,
-    agreement,
-    hot,
-    watch,
-  });
-  const takeawayOne = agreement.length
-    ? `The closing lane is real but narrow: ${listDealNames(agreement, 4)} are already in agreement stage. These should get the most operational attention this week.`
-    : "There are no deals currently marked agreement stage, so the focus should be moving the strongest hot leads into a closeable lane.";
-  const takeawayTwo = hot.length
-    ? `The next layer of closable pipeline is ${listDealNames(hot, 5)}. These are not just generic SQLs; they have proposal, verbal-confirmed, or second-call signals.`
-    : "There are no obvious high-probability leads after agreement stage, which means the team needs to rebuild the next closeable layer.";
-  const takeawayThree = newSignals.length
-    ? `New or newly important leads worth attention: ${listDealNames(newSignals, 5)}. These should be checked for owner, next step, and meeting date.`
-    : "No new high-signal leads stood out in the latest CRM change set.";
-  const takeawayFour = `Inbound is carrying ${inboundSqls} SQLs and outbound is carrying ${outboundSqls}. The CEO read should stay split by source because the operating motion is different for each.`;
-  const takeawayFive = activeUnassigned.length
-    ? `${activeUnassigned.length} active opportunities are unassigned. This is the main execution leak because good leads can look healthy in stage while nobody is clearly accountable.`
-    : "Ownership looks clean on the active pipeline right now.";
-  const ceoTakeaway = `The pipeline has enough activity to manage, but the CEO view should stay focused on conversion discipline: close the agreement-stage deals, protect the hot leads, and assign every active opportunity.`;
+  const snapshotRows = pipelineSnapshotRows(pipeline);
+  const newEnterpriseRows = tableRows(
+    ["Lead", "Signal", "Owner"],
+    pipeline.newEnterprise.slice(0, 8).map((deal) => [
+      cleanName(deal.account),
+      conciseSignal(deal),
+      cleanOwner(deal.owner),
+    ]),
+  );
+  const upcomingMeetingRows = tableRows(
+    ["Lead", "Date", "Signal"],
+    pipeline.upcomingMeetings.slice(0, 8).map((deal) => [
+      cleanName(deal.account),
+      dateLabel(deal.firstMeetingDate),
+      conciseSignal(deal),
+    ]),
+  );
+  const dinnerRows = tableRows(
+    ["Market", "Follow-ups"],
+    dinnerMarkets.map(([market, marketDeals]) => [
+      market,
+      `${marketDeals.length}: ${marketDeals.map((deal) => cleanName(deal.account)).join(", ")}`,
+    ]),
+  );
+  const decisionRows = tableRows(
+    ["Decision", "Affected Opportunities"],
+    [
+      [
+        "Implementation fee flexibility",
+        pipeline.feeConcern.length
+          ? pipeline.feeConcern.map((deal) => cleanName(deal.account)).join(", ")
+          : "No specific implementation-fee blockers found in CRM notes.",
+      ],
+      ["CEO follow-up", ceoFollowUpNames(pipeline)],
+    ],
+  );
+
+  const keyHighlights = [
+    `${pipeline.agreement.length} deals are now at agreement stage or approaching signature.`,
+    `${pipeline.activeEnterpriseCount} active enterprise opportunities remain in the late-stage pipeline.`,
+    `${pipeline.newEnterprise.length} new or newly important enterprise opportunities are visible.`,
+    `CMO dinners have produced ${pipeline.dinnerFollowUps.length} qualified follow-up meetings across ${dinnerMarkets.length || 1} market${dinnerMarkets.length === 1 ? "" : "s"}.`,
+  ];
+  const progressLines = progressLinesFor(pipeline, movement);
+  const ceoTakeaways = [
+    `${pipeline.agreement.length} deals are closest to signature: ${listDealNames(pipeline.agreement, 4)}.`,
+    `The hot lane has ${pipeline.hot.length} opportunities and should be the sales team's main operating focus.`,
+    newCeoLevel.length
+      ? `The newest CEO-level opportunities are ${listDealNames(newCeoLevel, 2)}.`
+      : "No new million-plus CEO-level opportunity was clearly marked in CRM this cycle.",
+    `CMO dinners are working as an enterprise acquisition channel, with ${pipeline.dinnerFollowUps.length} follow-up meetings captured.`,
+    `Two leads for CEO follow-up: ${ceoFollowUpNames(pipeline)}.`,
+  ];
 
   const paragraphs = [
     title,
     `Modified ${reportDate()}`,
     "Executive Summary",
-    bottomLine,
-    `This week: ${movedToAgreement} ${newAndNegative}`,
-    "The CEO focus should be simple: close agreement-stage deals, push the hot opportunities, and fix ownership gaps before they leak pipeline.",
-    "Current Sales Snapshot",
-    ...summaryRows.map((row) => row.join(" | ")),
-    "Closing Board",
-    ...closingRows.map((row) => row.join(" | ")),
-    "Key Takeaways For CEO",
-    `1. ${takeawayOne}`,
-    `2. ${takeawayTwo}`,
-    `3. ${takeawayThree}`,
-    `4. ${takeawayFour}`,
-    `5. ${takeawayFive}`,
-    "Recommended Decisions",
-    "1. Which agreement-stage deal needs senior help this week?",
-    "2. Who owns every unassigned active opportunity by end of day?",
-    "3. Which hot lead deserves Nuseir or leadership involvement?",
-    "CEO Takeaway",
-    ceoTakeaway,
-    "Appendix: Recent CRM Movement",
-    movedToAgreement,
-    newAndNegative,
-    importantChanges,
-    inboundShape,
-    outboundShape,
-    ...newSignalLines,
+    executiveSummary,
+    "Pipeline Health",
+    `Overall Health: ${health}`,
+    "Key highlights",
+    ...keyHighlights.map((line) => `- ${line}`),
+    "Enterprise Pipeline Snapshot",
+    ...snapshotRows.map((row) => row.join(" | ")),
+    "Pipeline Progress Since Last Update",
+    ...progressLines,
+    "Commercial Decision Required",
+    commercialDecisionText(pipeline),
+    "New Enterprise Opportunities",
+    ...newEnterpriseRows.map((row) => row.join(" | ")),
+    "Upcoming Enterprise Meetings",
+    ...upcomingMeetingRows.map((row) => row.join(" | ")),
+    "CMO Dinner Follow-ups",
+    ...dinnerRows.map((row) => row.join(" | ")),
+    "CEO Takeaways",
+    ...ceoTakeaways.map((line) => `- ${line}`),
   ];
+
   const blocks = reportBlocks([
     { type: "heading1", text: title },
     { type: "text", text: `Modified ${reportDate()}` },
     { type: "heading2", text: "Executive Summary" },
-    { type: "text", text: bottomLine },
-    { type: "text", text: `This week: ${movedToAgreement} ${newAndNegative}` },
-    {
-      type: "text",
-      text: "The CEO focus should be simple: close agreement-stage deals, push the hot opportunities, and fix ownership gaps before they leak pipeline.",
-    },
+    { type: "text", text: executiveSummary },
     { type: "divider" },
-    { type: "heading2", text: "Current Sales Snapshot" },
-    { type: "table", rows: summaryRows },
+    { type: "heading2", text: "Pipeline Health" },
+    { type: "table", rows: pipelineHealthRows },
+    { type: "text", text: "Key highlights" },
+    ...keyHighlights.map((text) => ({ type: "text" as const, text: `- ${text}` })),
     { type: "divider" },
-    { type: "heading2", text: "Closing Board" },
-    { type: "table", rows: closingRows },
+    { type: "heading2", text: "Enterprise Pipeline Snapshot" },
+    { type: "table", rows: snapshotRows },
     { type: "divider" },
-    { type: "heading2", text: "Key Takeaways For CEO" },
-    { type: "heading2", text: "1. Closing lane is the priority" },
-    { type: "text", text: takeawayOne },
-    { type: "heading2", text: "2. Hot pipeline needs a push" },
-    { type: "text", text: takeawayTwo },
-    { type: "heading2", text: "3. New signals need fast ownership" },
-    { type: "text", text: takeawayThree },
-    { type: "heading2", text: "4. Inbound and outbound need separate reads" },
-    { type: "text", text: takeawayFour },
-    { type: "heading2", text: "5. Ownership is the main execution risk" },
-    { type: "text", text: takeawayFive },
+    { type: "heading2", text: "Pipeline Progress Since Last Update" },
+    ...progressLines.map((text) => ({ type: "text" as const, text })),
     { type: "divider" },
-    { type: "heading2", text: "Recommended Decisions" },
-    { type: "text", text: "1. Which agreement-stage deal needs senior help this week?" },
-    { type: "text", text: "2. Who owns every unassigned active opportunity by end of day?" },
-    { type: "text", text: "3. Which hot lead deserves Nuseir or leadership involvement?" },
+    { type: "heading2", text: "Commercial Decision Required" },
+    { type: "text", text: commercialDecisionText(pipeline) },
+    { type: "table", rows: decisionRows },
     { type: "divider" },
-    { type: "heading2", text: "CEO Takeaway" },
-    { type: "text", text: ceoTakeaway },
+    { type: "heading2", text: "New Enterprise Opportunities" },
+    { type: "table", rows: newEnterpriseRows },
     { type: "divider" },
-    { type: "heading2", text: "Appendix: Recent CRM Movement" },
-    { type: "text", text: importantChanges },
-    { type: "text", text: inboundShape },
-    { type: "text", text: outboundShape },
+    { type: "heading2", text: "Upcoming Enterprise Meetings" },
+    { type: "text", text: "Calls we are excited about." },
+    { type: "table", rows: upcomingMeetingRows },
+    { type: "divider" },
+    { type: "heading2", text: "CMO Dinner Follow-ups" },
+    { type: "text", text: "The dinner strategy continues to convert into qualified enterprise meetings." },
+    { type: "table", rows: dinnerRows },
+    { type: "divider" },
+    { type: "heading2", text: "CEO Takeaways" },
+    ...ceoTakeaways.map((text) => ({ type: "text" as const, text: `- ${text}` })),
   ]);
 
   return {
@@ -167,98 +176,181 @@ export function buildCeoSalesReport({
   };
 }
 
-function reportBlocks(blocks: LarkReportBlock[]) {
-  return blocks;
+function buildPipelineSet(deals: SalesDeal[], recentChanges: SalesMemoryChange[]): PipelineSet {
+  const signed = topByStage(deals, isCompleted, 6);
+  const agreement = topByStage(deals, isAgreementStage, 6);
+  const hot = topByStage(deals, isHotOpportunity, 14);
+  const worthSecondCall = topByStage(deals, isWorthSecondCall, 12);
+  const upcomingMeetings = upcomingBookedMeetings(deals).filter(isEnterpriseLead);
+  const dinnerFollowUps = cmoDinnerFollowUps(deals);
+  const newEnterprise = newEnterpriseSignals(deals, recentChanges);
+  const feeConcern = implementationFeeConcerns(deals);
+  const activeEnterpriseCount = uniqueDeals([...agreement, ...hot]).length;
+
+  return {
+    signed,
+    agreement,
+    hot,
+    worthSecondCall,
+    upcomingMeetings,
+    dinnerFollowUps,
+    newEnterprise,
+    feeConcern,
+    activeEnterpriseCount,
+  };
 }
 
-function closingBoardRows({
-  signed,
-  agreement,
-  hot,
-  watch,
-}: {
-  signed: SalesDeal[];
-  agreement: SalesDeal[];
-  hot: SalesDeal[];
-  watch: SalesDeal[];
-}) {
-  const rows = [["Lane", "Lead", "Owner", "Signal"]];
-  const sections = [
-    ["Completed", signed.slice(0, 4)],
-    ["Agreement Stage", agreement.slice(0, 5)],
-    ["High Probability", hot.slice(0, 6)],
-    ["Worth Watching", watch.slice(0, 6)],
-  ] as const;
+function pipelineSnapshotRows(pipeline: PipelineSet) {
+  const columns = [
+    pipeline.signed,
+    pipeline.agreement,
+    pipeline.hot,
+    pipeline.worthSecondCall,
+  ];
+  const maxRows = Math.max(...columns.map((column) => column.length), 1);
+  const rows = [["Signed", "Agreement Stage", "Hot", "Worth a Second Call"]];
 
-  for (const [lane, deals] of sections) {
-    if (!deals.length) {
-      rows.push([lane, "None", "", ""]);
-      continue;
-    }
-
-    for (const deal of deals) {
-      rows.push([lane, deal.account, cleanOwner(deal.owner), conciseSignal(deal)]);
-    }
+  for (let index = 0; index < Math.min(maxRows, 14); index += 1) {
+    rows.push([
+      snapshotCell(pipeline.signed[index]),
+      snapshotCell(pipeline.agreement[index]),
+      snapshotCell(pipeline.hot[index]),
+      snapshotCell(pipeline.worthSecondCall[index]),
+    ]);
   }
 
-  return rows.slice(0, 18);
+  return rows;
 }
 
-function conciseSignal(deal: SalesDeal) {
+function snapshotCell(deal?: SalesDeal) {
+  if (!deal) return "";
+  const meeting = deal.firstMeetingDate ? ` (${dateLabel(deal.firstMeetingDate)})` : "";
+  return `${cleanName(deal.account)}${meeting}`;
+}
+
+function progressLinesFor(pipeline: PipelineSet, movement: ReturnType<typeof movementSinceLastReport>) {
   return [
-    stageFor(deal),
-    deal.firstMeetingDate ? `meeting ${dateLabel(deal.firstMeetingDate)}` : "",
-    deal.budget && deal.budget !== "Unknown" ? deal.budget : "",
-  ]
-    .filter(Boolean)
-    .join(" | ");
+    "Agreement Stage",
+    ...dealBullets(
+      pipeline.agreement.slice(0, 5),
+      (deal) => `${cleanName(deal.account)} - ${progressNote(deal)}`,
+    ),
+    "Hot Opportunities",
+    ...dealBullets(
+      pipeline.hot.slice(0, 10),
+      (deal) => `${cleanName(deal.account)} - ${progressNote(deal)}`,
+    ),
+    movement.important.length
+      ? `Other movement worth noting: ${movement.important.slice(0, 4).map(formatChange).join("; ")}.`
+      : "Other movement worth noting: no major non-closing stage changes found this week.",
+  ];
 }
 
-function highProbabilityDeals(deals: SalesDeal[]) {
+function commercialDecisionText(pipeline: PipelineSet) {
+  if (!pipeline.feeConcern.length) {
+    return "No clear commercial decision blocker is currently tagged in the CRM notes.";
+  }
+
+  return (
+    "Some prospects have raised concerns around pricing or implementation fee. " +
+    "Recommendation: consider a time-boxed implementation-fee concession for agreements signed before month-end."
+  );
+}
+
+function tableRows(header: string[], rows: string[][]) {
+  return [header, ...(rows.length ? rows : [header.map((_, index) => (index === 0 ? "None" : ""))])];
+}
+
+function cmoDinnerFollowUps(deals: SalesDeal[]) {
   return topByStage(
     deals,
     (deal) =>
-      !["Completed", "Agreement Stage", "Lost", "Gone Cold"].includes(deal.finalVerdict) &&
-      (["Confirmed (Verbal)", "2nd call with Nuseir"].includes(deal.finalVerdict) ||
-        deal.nextStepsStatus === "Proposal Done" ||
-        (deal.callStage === "Sales Qualified" && deal.qualification === "Fit")),
-    12,
+      isDinnerBoard(deal) &&
+      !isNegative(deal) &&
+      (deal.callStage === "Booked a Meeting" ||
+        deal.callStage === "Sales Qualified" ||
+        deal.finalVerdict.includes("Meeting") ||
+        deal.nextStepsStatus.includes("Meeting") ||
+        deal.followUp.length > 0),
+    24,
   );
 }
 
-function watchListDeals(deals: SalesDeal[]) {
-  const named = ["Ironasylum", "Movinglife", "LetsBeco", "DS18", "AltitudeX", "Mycospring"];
-  const explicit = deals.filter((deal) =>
-    named.some((name) => deal.account.toLowerCase().includes(name.toLowerCase())),
-  );
-  const secondCall = topByStage(
-    deals,
-    (deal) =>
-      !["Completed", "Agreement Stage", "Lost", "Gone Cold"].includes(deal.finalVerdict) &&
-      (deal.callStage === "Booked a Meeting" || deal.nextStepsStatus === "Proposal Stage"),
-    10,
-  );
+function groupDinnerFollowUps(deals: SalesDeal[]) {
+  const groups = new Map<string, SalesDeal[]>();
 
-  return uniqueDeals([...explicit, ...secondCall]).sort((a, b) => scoreDeal(b) - scoreDeal(a));
+  for (const deal of deals) {
+    const market = dinnerMarket(deal);
+    groups.set(market, [...(groups.get(market) || []), deal]);
+  }
+
+  return [...groups.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 6);
 }
 
-function newLeadSignals(deals: SalesDeal[], changes: SalesMemoryChange[]) {
+function dinnerMarket(deal: SalesDeal) {
+  const raw = `${deal.group || ""} ${deal.country || ""} ${deal.source || ""} ${deal.agentNotes || ""}`;
+  const lower = raw.toLowerCase();
+
+  if (lower.includes("miami") || lower.includes("usa") || lower.includes("united states")) return "Miami / US";
+  if (lower.includes("singapore")) return "Singapore";
+  if (lower.includes("tel aviv") || lower.includes("israel")) return "Tel Aviv";
+  return deal.group && deal.group !== "Unknown" ? deal.group : "CMO Dinner";
+}
+
+function newEnterpriseSignals(deals: SalesDeal[], changes: SalesMemoryChange[]) {
   const createdIds = new Set(
     changes
       .filter((change) => change.field === "created")
       .map((change) => change.itemId),
   );
-  const createdDeals = deals.filter((deal) => createdIds.has(deal.id));
-  const notableNames = ["Movinglife", "LetsBeco", "Airwallex", "Subway", "Gainswave", "Rently"];
+  const created = deals.filter((deal) => createdIds.has(deal.id));
+  const named = [
+    "MovingLife",
+    "Gennoma",
+    "Genomma",
+    "LetsBeco",
+    "Beco",
+    "Airwallex",
+    "Subway",
+    "Gainswave",
+    "GoUSA",
+    "3M",
+    "India Times",
+  ];
   const notable = deals.filter((deal) =>
-    notableNames.some((name) => deal.account.toLowerCase().includes(name.toLowerCase())),
-  );
-  const highBudget = createdDeals.filter((deal) =>
-    ["$300k-1m /year", "$1m+ /year", "$1m+ / year"].includes(deal.budget),
+    named.some((name) => deal.account.toLowerCase().includes(name.toLowerCase())),
   );
 
-  return uniqueDeals([...highBudget, ...notable, ...topByStage(createdDeals, () => true, 8)])
-    .sort((a, b) => scoreDeal(b) - scoreDeal(a));
+  return uniqueDeals([...created.filter(isEnterpriseLead), ...notable, ...topByStage(deals, isMillionPlusLead, 8)])
+    .sort((a, b) => scoreDeal(b) - scoreDeal(a))
+    .slice(0, 10);
+}
+
+function implementationFeeConcerns(deals: SalesDeal[]) {
+  const explicit = ["Modernising Trends", "Modernizing Trends", "SG Doors", "Suneraa", "Sunera"];
+
+  return topByStage(
+    deals,
+    (deal) => {
+      const text = `${deal.account} ${deal.agentNotes} ${deal.salesCallNotes} ${deal.lookingFor}`.toLowerCase();
+      return (
+        explicit.some((name) => deal.account.toLowerCase().includes(name.toLowerCase())) ||
+        text.includes("implementation fee") ||
+        text.includes("setup fee") ||
+        text.includes("pricing concern") ||
+        text.includes("discount")
+      );
+    },
+    8,
+  );
+}
+
+function ceoFollowUpNames(pipeline: PipelineSet) {
+  const preferred = [...pipeline.hot, ...pipeline.worthSecondCall].filter((deal) =>
+    ["kipp", "zumba"].some((name) => deal.account.toLowerCase().includes(name)),
+  );
+  const fallback = uniqueDeals([...preferred, ...pipeline.hot, ...pipeline.agreement]).slice(0, 2);
+  return fallback.length ? listDealNames(fallback, 2) : "none identified";
 }
 
 function movementSinceLastReport(changes: SalesMemoryChange[]) {
@@ -266,22 +358,17 @@ function movementSinceLastReport(changes: SalesMemoryChange[]) {
   const agreementMoves = recent
     .filter((change) => change.field === "finalVerdict" && change.after === "Agreement Stage")
     .map((change) => change.account);
-  const createdCount = recent.filter((change) => change.field === "created").length;
-  const negativeCount = recent.filter(
-    (change) =>
-      ["callStage", "finalVerdict"].includes(change.field) &&
-      ["Lost", "No Show", "Gone Cold"].includes(change.after || ""),
-  ).length;
   const important = recent.filter(
     (change) =>
       change.field !== "created" &&
       (change.after === "Agreement Stage" ||
         change.after === "Confirmed (Verbal)" ||
         change.after === "Lost" ||
-        change.after === "No Show"),
+        change.after === "No Show" ||
+        change.after === "Proposal Done"),
   );
 
-  return { agreementMoves, createdCount, negativeCount, important };
+  return { agreementMoves, important };
 }
 
 function topByStage(
@@ -299,41 +386,6 @@ function topByStage(
     .slice(0, limit);
 }
 
-function dealLines(deals: SalesDeal[]) {
-  if (!deals.length) return ["None."];
-  return deals.map((deal) => `- ${dealLine(deal)}`);
-}
-
-function dealLine(deal: SalesDeal) {
-  const parts = [
-    deal.account,
-    stageFor(deal),
-    cleanOwner(deal.owner) !== "Unassigned" ? cleanOwner(deal.owner) : "unassigned",
-    deal.firstMeetingDate ? `meeting ${dateLabel(deal.firstMeetingDate)}` : "",
-    deal.budget && deal.budget !== "Unknown" ? deal.budget : "",
-  ].filter(Boolean);
-
-  return parts.join(" | ");
-}
-
-function listDealNames(deals: SalesDeal[], limit: number) {
-  const names = deals.slice(0, limit).map(shortDealName);
-  return names.length ? names.join(", ") : "none";
-}
-
-function scoreDeal(deal: SalesDeal) {
-  const stage = stageFor(deal);
-  if (stage.includes("Completed")) return 100;
-  if (stage.includes("Agreement Stage")) return 90;
-  if (stage.includes("Confirmed")) return 80;
-  if (stage.includes("2nd call")) return 75;
-  if (stage.includes("Proposal Done")) return 70;
-  if (stage.includes("Proposal Stage")) return 60;
-  if (stage.includes("Sales Qualified")) return 50;
-  if (stage.includes("Booked a Meeting")) return 40;
-  return 0;
-}
-
 function upcomingBookedMeetings(deals: SalesDeal[]) {
   const today = todayInSingapore();
 
@@ -346,30 +398,108 @@ function upcomingBookedMeetings(deals: SalesDeal[]) {
     .sort((a, b) => dateOnly(a.firstMeetingDate).localeCompare(dateOnly(b.firstMeetingDate)));
 }
 
-function changesThisWeek(changes: SalesMemoryChange[]) {
-  const weekStart = startOfWeekInSingapore();
-  return changes.filter((change) => dateOnly(change.crawledAt) >= weekStart);
+function dealBullets(deals: SalesDeal[], formatter: (deal: SalesDeal) => string) {
+  if (!deals.length) return ["- None currently marked."];
+  return deals.map((deal) => `- ${formatter(deal)}`);
 }
 
-function startOfWeekInSingapore() {
-  const today = new Date(`${todayInSingapore()}T00:00:00+08:00`);
-  const day = today.getUTCDay() || 7;
-  today.setUTCDate(today.getUTCDate() - day + 1);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Singapore",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(today);
+function progressNote(deal: SalesDeal) {
+  const notes = stripHtml(deal.agentNotes || deal.salesCallNotes || deal.lookingFor);
+  if (notes) return shortSentence(notes);
+
+  if (deal.finalVerdict === "Agreement Stage") return "Agreement stage; needs close follow-up.";
+  if (deal.finalVerdict === "Confirmed (Verbal)") return "Verbally confirmed; needs conversion to agreement.";
+  if (deal.finalVerdict === "2nd call with Nuseir") return "Second call with Nuseir; leadership involvement is already in motion.";
+  if (deal.nextStepsStatus === "Proposal Done") return "Proposal sent; waiting for response or next push.";
+  if (deal.callStage === "Booked a Meeting") return "Meeting booked; prepare sharp enterprise POV.";
+
+  return conciseSignal(deal) || "Active opportunity.";
 }
 
-function formatChange(change: SalesMemoryChange) {
-  return `${change.account} ${change.field} ${change.before || "blank"} -> ${change.after || "blank"}`;
+function conciseSignal(deal: SalesDeal) {
+  return [
+    stageFor(deal),
+    deal.budget && deal.budget !== "Unknown" ? deal.budget : "",
+    cleanOwner(deal.owner) !== "Unassigned" ? cleanOwner(deal.owner) : "",
+  ]
+    .filter(Boolean)
+    .join(" / ");
 }
 
-function shortDealName(deal: SalesDeal) {
-  const meeting = deal.firstMeetingDate ? ` (${dateLabel(deal.firstMeetingDate)})` : "";
-  return `${deal.account}${meeting}`;
+function scoreDeal(deal: SalesDeal) {
+  const stage = stageFor(deal);
+  let score = 0;
+
+  if (stage.includes("Completed")) score += 100;
+  if (stage.includes("Agreement Stage")) score += 90;
+  if (stage.includes("Confirmed")) score += 80;
+  if (stage.includes("2nd call")) score += 75;
+  if (stage.includes("Proposal Done")) score += 70;
+  if (stage.includes("Proposal Stage")) score += 60;
+  if (stage.includes("Sales Qualified")) score += 50;
+  if (stage.includes("Booked a Meeting")) score += 40;
+  if (isMillionPlusLead(deal)) score += 20;
+  if (isDinnerBoard(deal)) score += 8;
+
+  return score;
+}
+
+function isCompleted(deal: SalesDeal) {
+  return deal.finalVerdict === "Completed";
+}
+
+function isAgreementStage(deal: SalesDeal) {
+  return deal.finalVerdict === "Agreement Stage" || deal.nextStepsStatus === "Agreement Stage";
+}
+
+function isHotOpportunity(deal: SalesDeal) {
+  if (isCompleted(deal) || isAgreementStage(deal) || isNegative(deal)) return false;
+
+  return (
+    deal.finalVerdict === "Confirmed (Verbal)" ||
+    deal.finalVerdict === "2nd call with Nuseir" ||
+    deal.nextStepsStatus === "Proposal Done" ||
+    deal.nextStepsStatus === "Proposal Stage" ||
+    (deal.callStage === "Sales Qualified" && isEnterpriseLead(deal))
+  );
+}
+
+function isWorthSecondCall(deal: SalesDeal) {
+  if (isCompleted(deal) || isAgreementStage(deal) || isHotOpportunity(deal) || isNegative(deal)) {
+    return false;
+  }
+
+  return deal.callStage === "Booked a Meeting" || deal.callStage === "Sales Qualified" || isEnterpriseLead(deal);
+}
+
+function isEnterpriseLead(deal: SalesDeal) {
+  const budget = deal.budget.toLowerCase();
+  const notes = `${deal.account} ${deal.jobTitle} ${deal.agentNotes} ${deal.salesCallNotes} ${deal.lookingFor}`.toLowerCase();
+
+  return (
+    isMillionPlusLead(deal) ||
+    budget.includes("300") ||
+    budget.includes("100k") ||
+    notes.includes("enterprise") ||
+    notes.includes("ceo") ||
+    notes.includes("cmo") ||
+    notes.includes("head of") ||
+    notes.includes("million") ||
+    notes.includes("$1m")
+  );
+}
+
+function isMillionPlusLead(deal: SalesDeal) {
+  const text = `${deal.budget} ${deal.agentNotes} ${deal.salesCallNotes} ${deal.lookingFor}`.toLowerCase();
+  return text.includes("$1m") || text.includes("1m+") || text.includes("million") || text.includes("$ms");
+}
+
+function isDinnerBoard(deal: SalesDeal) {
+  return deal.boardId === "5030120019" || (deal.boardName || "").toLowerCase().includes("cmo dinner");
+}
+
+function isNegative(deal: SalesDeal) {
+  return ["Lost", "Gone Cold", "No Show"].includes(deal.finalVerdict) || deal.callStage === "No Show";
 }
 
 function stageFor(deal: SalesDeal) {
@@ -382,27 +512,36 @@ function cleanOwner(owner: string) {
   return owner && owner !== "Unassigned" ? owner : "Unassigned";
 }
 
-function listNames(names: string[]) {
-  if (!names.length) return "none";
-  return [...new Set(names)].join(", ");
+function cleanName(name: string) {
+  return name.replace(/\s+/g, " ").trim();
+}
+
+function listDealNames(deals: SalesDeal[], limit: number) {
+  const names = deals.slice(0, limit).map((deal) => cleanName(deal.account));
+  return names.length ? names.join(", ") : "none";
 }
 
 function uniqueDeals(deals: SalesDeal[]) {
   const seen = new Set<string>();
   return deals.filter((deal) => {
-    if (seen.has(deal.id)) return false;
-    seen.add(deal.id);
+    const key = `${deal.boardId || "unknown"}:${deal.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
 
-function isOutbound(deal: SalesDeal) {
-  if (deal.group) return deal.group === "Outbound Leads";
-  return deal.source?.toLowerCase().includes("outbound") || false;
+function changesThisWeek(changes: SalesMemoryChange[]) {
+  const weekStart = startOfWeekInSingapore();
+  return changes.filter((change) => dateOnly(change.crawledAt) >= weekStart);
 }
 
-function countWhere(deals: SalesDeal[], predicate: (deal: SalesDeal) => boolean) {
-  return deals.filter(predicate).length;
+function formatChange(change: SalesMemoryChange) {
+  return `${change.account}: ${change.before || "blank"} -> ${change.after || "blank"}`;
+}
+
+function reportBlocks(blocks: LarkReportBlock[]) {
+  return blocks;
 }
 
 function reportDate() {
@@ -411,6 +550,18 @@ function reportDate() {
     day: "numeric",
     month: "long",
   }).format(new Date());
+}
+
+function startOfWeekInSingapore() {
+  const today = new Date(`${todayInSingapore()}T00:00:00+08:00`);
+  const day = today.getUTCDay() || 7;
+  today.setUTCDate(today.getUTCDate() - day + 1);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Singapore",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(today);
 }
 
 function todayInSingapore() {
@@ -429,7 +580,7 @@ function dateOnly(value: string) {
 
 function dateLabel(value: string) {
   const match = value.match(/\d{4}-(\d{2})-(\d{2})/);
-  if (!match) return value;
+  if (!match) return value || "";
 
   const month = Number(match[1]);
   const day = Number(match[2]);
@@ -440,4 +591,18 @@ function dateLabel(value: string) {
     month: "short",
     day: "numeric",
   }).format(date);
+}
+
+function stripHtml(value: string) {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function shortSentence(value: string) {
+  const sentence = value.split(/(?<=[.!?])\s+/)[0] || value;
+  return sentence.length > 150 ? `${sentence.slice(0, 147).trim()}...` : sentence;
 }
