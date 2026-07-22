@@ -1,4 +1,4 @@
-import { crawlSalesMemory } from "./sales-memory";
+import { crawlSalesMemory, getConfiguredSalesBoardIds } from "./sales-memory";
 
 declare global {
   var salesBrainMemoryScheduler:
@@ -24,14 +24,14 @@ export function ensureSalesMemorySchedulerStarted() {
     };
   }
 
-  const boardId = process.env.MONDAY_SALES_BOARD_ID;
+  const boardIds = getConfiguredSalesBoardIds();
 
-  if (!boardId) {
-    return { enabled: true, started: false, error: "MONDAY_SALES_BOARD_ID is missing." };
+  if (!boardIds.length) {
+    return { enabled: true, started: false, error: "MONDAY_SALES_BOARD_IDS is missing." };
   }
 
   const run = () => {
-    crawlSalesMemory(boardId).catch((error) => {
+    crawlSalesMemory(boardIds).catch((error) => {
       console.error("Sales Brain memory crawl failed", error);
     });
   };

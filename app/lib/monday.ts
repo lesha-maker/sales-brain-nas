@@ -2,6 +2,8 @@ const MONDAY_API_URL = "https://api.monday.com/v2";
 
 export type SalesDeal = {
   id: string;
+  boardId?: string;
+  boardName?: string;
   account: string;
   group?: string;
   owner: string;
@@ -255,11 +257,15 @@ const columns = {
 
 function normalizeDeals(board: {
   id: string;
+  name?: string;
   columns: Array<{ id: string; title: string; type: string; settings_str?: string }>;
   items_page: { items: MondayItem[] };
 }) {
   const columnLabels = new Map(
     board.columns.map((column) => [column.id, parseStatusLabels(column.settings_str)]),
+  );
+  const columnIdsByTitle = new Map(
+    board.columns.map((column) => [normalizeColumnTitle(column.title), column.id]),
   );
 
   return board.items_page.items.map((item) => {
@@ -287,25 +293,52 @@ function normalizeDeals(board: {
 
       return "";
     };
+    const valueForTitle = (...titles: string[]) =>
+      firstPresent(titles.map((title) => valueFor(columnIdsByTitle.get(normalizeColumnTitle(title)) || ""))) ||
+      "";
 
     const notes = valueFor(columns.notes);
     const inferredVerdict = verdictFromNotes(notes);
-    const qualification = valueFor(columns.qualification);
-    const initialOutreach = valueFor(columns.outreach);
-    const callStage = valueFor(columns.callStage);
-    const nextStepsStatus = valueFor(columns.nextStepsStatus);
-    const finalVerdict = valueFor(columns.finalVerdict);
-    const firstMeetingDate = valueFor(columns.firstMeeting);
-    const latestMeetingDate = valueFor(columns.latestMeeting);
-    const lastFollowUpDate = valueFor(columns.lastFollowUpDate);
-    const firstName = valueFor(columns.firstName);
-    const lastName = valueFor(columns.lastName);
-    const website = valueFor(columns.website);
-    const phone = valueFor(columns.phone);
-    const lookingFor = valueFor(columns.lookingFor);
-    const status = valueFor(columns.status);
-    const followUp = valueFor(columns.followUp);
-    const salesCallNotes = valueFor(columns.salesCallNotes);
+    const qualification =
+      firstPresent([
+        valueFor(columns.qualification),
+        valueForTitle("Nas.com Qualified", "Qualification"),
+      ]) || "";
+    const initialOutreach =
+      firstPresent([
+        valueFor(columns.outreach),
+        valueForTitle("Initial Outreach", "How Heard", "Source"),
+      ]) || "";
+    const callStage =
+      firstPresent([
+        valueFor(columns.callStage),
+        valueForTitle("Call Stage", "After Dinner Status", "Attendance"),
+      ]) || "";
+    const nextStepsStatus =
+      firstPresent([valueFor(columns.nextStepsStatus), valueForTitle("Next Steps")]) || "";
+    const finalVerdict =
+      firstPresent([valueFor(columns.finalVerdict), valueForTitle("Final Verdict")]) || "";
+    const firstMeetingDate =
+      firstPresent([valueFor(columns.firstMeeting), valueForTitle("1st Meeting Date", "Event Date")]) ||
+      "";
+    const latestMeetingDate =
+      firstPresent([valueFor(columns.latestMeeting), valueForTitle("Latest Meeting Date")]) || "";
+    const lastFollowUpDate =
+      firstPresent([valueFor(columns.lastFollowUpDate), valueForTitle("Last follow up")]) || "";
+    const owner =
+      firstPresent([valueFor(columns.owner), valueForTitle("Assigned To", "Owner")]) || "Unassigned";
+    const firstName = firstPresent([valueFor(columns.firstName), valueForTitle("First Name")]) || "";
+    const lastName = firstPresent([valueFor(columns.lastName), valueForTitle("Last Name")]) || "";
+    const website = firstPresent([valueFor(columns.website), valueForTitle("Website")]) || "";
+    const phone = firstPresent([valueFor(columns.phone), valueForTitle("Phone")]) || "";
+    const lookingFor =
+      firstPresent([valueFor(columns.lookingFor), valueForTitle("AI Concern", "Looking For")]) || "";
+    const cmoNotes = valueForTitle("Lead Notes / Intel");
+    const status = firstPresent([valueFor(columns.status), valueForTitle("Status")]) || "";
+    const followUp = firstPresent([valueFor(columns.followUp), valueForTitle("Hand Off")]) || "";
+    const salesCallNotes =
+      firstPresent([valueFor(columns.salesCallNotes), cmoNotes, valueForTitle("Sales Call Notes")]) ||
+      "";
     const stage =
       firstPresent([
         finalVerdict,
@@ -326,21 +359,26 @@ function normalizeDeals(board: {
         valueFor(columns.added),
       ]) || "";
 
-    const budget = valueFor(columns.budget);
+    const budget = firstPresent([valueFor(columns.budget), valueForTitle("Budget")]) || "";
     const probability = probabilityFrom({
-      probability: valueFor(columns.probability),
+      probability: firstPresent([
+        valueFor(columns.probability),
+        valueForTitle("Probability of Closing"),
+      ]) || "",
       finalVerdict,
       qualification,
       budget,
-      notes,
+      notes: firstPresent([notes, cmoNotes]) || "",
     });
     const lastActivityDays = daysSince(lastActivityDate);
 
     return {
       id: item.id,
+      boardId: board.id,
+      boardName: board.name,
       account: item.name,
       group: item.group?.title || "Unknown",
-      owner: valueFor(columns.owner) || "Unassigned",
+      owner,
       stage,
       qualification,
       initialOutreach,
@@ -381,11 +419,16 @@ function normalizeDeals(board: {
       website,
       phone,
       lookingFor,
-      agentNotes: notes,
+      agentNotes: firstPresent([notes, cmoNotes]) || "",
       status,
       followUp,
       salesCallNotes,
-      source: valueFor(columns.source) || item.group?.title || "Unknown",
+      source:
+        firstPresent([
+          valueFor(columns.source),
+          valueForTitle("Inbound / Outbound", "Source"),
+          item.group?.title,
+        ]) || "Unknown",
       mondayUrl: `https://nas-io.monday.com/boards/${board.id}/pulses/${item.id}`,
     } satisfies SalesDeal;
   });
@@ -397,6 +440,10 @@ function parseStatusLabels(settings?: string) {
   } catch {
     return {};
   }
+}
+
+function normalizeColumnTitle(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function firstPresent(values: Array<string | undefined | null>) {

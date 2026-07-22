@@ -10,6 +10,10 @@ export type SalesMemorySnapshot = {
     id: string;
     name: string;
   };
+  boards?: Array<{
+    id: string;
+    name: string;
+  }>;
   summary: SalesMemorySummary;
   deals: SalesDeal[];
 };
@@ -33,6 +37,7 @@ export type SalesMemorySummary = {
 
 export type SalesMemoryChange = {
   crawledAt: string;
+  boardId?: string;
   itemId: string;
   account: string;
   field: keyof SalesDeal | "created" | "removed";
@@ -89,10 +94,28 @@ const trackedFields: Array<keyof SalesDeal> = [
 
 let activeCrawl: Promise<SalesMemorySnapshot> | null = null;
 
-export async function crawlSalesMemory(boardId: string) {
+export function getConfiguredSalesBoardIds() {
+  const configured =
+    process.env.MONDAY_SALES_BOARD_IDS ||
+    [process.env.MONDAY_SALES_BOARD_ID, process.env.MONDAY_ADDITIONAL_SALES_BOARD_IDS || "5030120019"]
+      .filter(Boolean)
+      .join(",");
+
+  return [
+    ...new Set(
+      configured
+        .split(",")
+        .map((boardId) => boardId.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+export async function crawlSalesMemory(boardIds: string | string[]) {
   if (activeCrawl) return activeCrawl;
 
-  activeCrawl = crawlAndStore(boardId).finally(() => {
+  const ids = Array.isArray(boardIds) ? boardIds : [boardIds];
+  activeCrawl = crawlAndStore(ids).finally(() => {
     activeCrawl = null;
   });
 
@@ -238,11 +261,19 @@ export async function registerLarkMessageDelivery(messageId: string) {
   }
 }
 
-async function crawlAndStore(boardId: string) {
+async function crawlAndStore(boardIds: string[]) {
   const previous = await getLatestSalesMemory();
-  const { board, deals } = await getBoardSnapshot(boardId);
+  const snapshots = await Promise.all(boardIds.map((boardId) => getBoardSnapshot(boardId)));
+  const boards = snapshots
+    .map((snapshot) => snapshot.board)
+    .filter(Boolean)
+    .map((board) => ({
+      id: board.id,
+      name: board.name,
+    }));
+  const deals = snapshots.flatMap((snapshot) => snapshot.deals);
 
-  if (!board) {
+  if (!boards.length) {
     throw new Error("monday board was not found.");
   }
 
@@ -251,9 +282,10 @@ async function crawlAndStore(boardId: string) {
     id: generatedAt.replace(/[:.]/g, "-"),
     generatedAt,
     board: {
-      id: board.id,
-      name: board.name,
+      id: boards[0].id,
+      name: boards.length > 1 ? `${boards.length} monday boards` : boards[0].name,
     },
+    boards,
     summary: buildSummary(deals),
     deals,
   };
@@ -289,6 +321,7 @@ function diffSnapshots(
   if (!previous) {
     return current.deals.map((deal) => ({
       crawledAt: current.generatedAt,
+      boardId: deal.boardId,
       itemId: deal.id,
       account: deal.account,
       field: "created",
@@ -297,15 +330,16 @@ function diffSnapshots(
   }
 
   const changes: SalesMemoryChange[] = [];
-  const previousById = new Map(previous.deals.map((deal) => [deal.id, deal]));
-  const currentById = new Map(current.deals.map((deal) => [deal.id, deal]));
+  const previousById = new Map(previous.deals.map((deal) => [dealKey(deal), deal]));
+  const currentById = new Map(current.deals.map((deal) => [dealKey(deal), deal]));
 
   for (const deal of current.deals) {
-    const before = previousById.get(deal.id);
+    const before = previousById.get(dealKey(deal));
 
     if (!before) {
       changes.push({
         crawledAt: current.generatedAt,
+        boardId: deal.boardId,
         itemId: deal.id,
         account: deal.account,
         field: "created",
@@ -321,6 +355,7 @@ function diffSnapshots(
       if (oldValue !== newValue) {
         changes.push({
           crawledAt: current.generatedAt,
+          boardId: deal.boardId,
           itemId: deal.id,
           account: deal.account,
           field,
@@ -332,9 +367,10 @@ function diffSnapshots(
   }
 
   for (const deal of previous.deals) {
-    if (!currentById.has(deal.id)) {
+    if (!currentById.has(dealKey(deal))) {
       changes.push({
         crawledAt: current.generatedAt,
+        boardId: deal.boardId,
         itemId: deal.id,
         account: deal.account,
         field: "removed",
@@ -344,6 +380,10 @@ function diffSnapshots(
   }
 
   return changes;
+}
+
+function dealKey(deal: SalesDeal) {
+  return `${deal.boardId || "unknown"}:${deal.id}`;
 }
 
 async function writeSnapshot(snapshot: SalesMemorySnapshot, changes: SalesMemoryChange[]) {

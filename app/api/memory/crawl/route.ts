@@ -1,22 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { crawlSalesMemory } from "../../../lib/sales-memory";
+import { crawlSalesMemory, getConfiguredSalesBoardIds } from "../../../lib/sales-memory";
 
 export async function POST(request: NextRequest) {
   const unauthorized = authorize(request);
   if (unauthorized) return unauthorized;
 
-  const boardId = process.env.MONDAY_SALES_BOARD_ID;
+  const boardIds = getConfiguredSalesBoardIds();
 
-  if (!boardId) {
-    return NextResponse.json({ error: "MONDAY_SALES_BOARD_ID is required." }, { status: 500 });
+  if (!boardIds.length) {
+    return NextResponse.json({ error: "MONDAY_SALES_BOARD_IDS is required." }, { status: 500 });
   }
 
   try {
-    const snapshot = await crawlSalesMemory(boardId);
+    const snapshot = await crawlSalesMemory(boardIds);
     return NextResponse.json({
       ok: true,
       generatedAt: snapshot.generatedAt,
       board: snapshot.board,
+      boards: snapshot.boards,
       summary: snapshot.summary,
     });
   } catch (error) {

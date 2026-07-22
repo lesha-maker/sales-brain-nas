@@ -12,6 +12,7 @@ import {
   appendSalesContextNote,
   clearPendingMondayAction,
   getConversationMemory,
+  getConfiguredSalesBoardIds,
   getLatestSalesMemory,
   getPendingMondayAction,
   getSalesContextNotes,
@@ -152,20 +153,23 @@ function conversationThreadId(message: NonNullable<LarkEventPayload["event"]>["m
 }
 
 async function loadSalesBoardDeals() {
-  const boardId = process.env.MONDAY_SALES_BOARD_ID;
+  const boardIds = getConfiguredSalesBoardIds();
 
-  if (!boardId) {
-    throw new Error("Sales Brain is missing MONDAY_SALES_BOARD_ID, so I cannot read the CRM yet.");
+  if (!boardIds.length) {
+    throw new Error("Sales Brain is missing MONDAY_SALES_BOARD_IDS, so I cannot read the CRM yet.");
   }
 
   const memory = await getLatestSalesMemory();
 
   if (memory?.deals.length && memory.deals.some((deal) => deal.group)) {
-    return { boardId, deals: memory.deals };
+    return { boardId: boardIds[0], deals: memory.deals };
   }
 
-  const { deals } = await getBoardSnapshot(boardId);
-  return { boardId, deals };
+  const snapshots = await Promise.all(boardIds.map((boardId) => getBoardSnapshot(boardId)));
+  return {
+    boardId: boardIds[0],
+    deals: snapshots.flatMap((snapshot) => snapshot.deals),
+  };
 }
 
 async function maybeHandleMondayWrite({
@@ -232,7 +236,7 @@ async function maybeHandleMondayWrite({
   await setPendingMondayAction(threadId, {
     id: `${Date.now()}-${deal.id}`,
     createdAt: new Date().toISOString(),
-    boardId,
+    boardId: deal.boardId || boardId,
     itemId: deal.id,
     account: deal.account,
     email: deal.email,
@@ -297,7 +301,7 @@ async function maybeHandleSalesMemoryCapture({
   await setPendingMondayAction(threadId, {
     id: saved.id,
     createdAt: saved.createdAt,
-    boardId,
+    boardId: deal.boardId || boardId,
     itemId: deal.id,
     account: deal.account,
     email: deal.email,
