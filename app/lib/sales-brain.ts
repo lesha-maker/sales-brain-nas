@@ -216,6 +216,22 @@ function directCmoDinnerAnswer(question: string, deals: SalesDeal[]) {
     .filter(isHotCmoDinnerLead)
     .sort((a, b) => cmoDinnerScore(b) - cmoDinnerScore(a))
     .slice(0, 10);
+  const firstNameQuery = requestedFirstName(normalized);
+
+  if (firstNameQuery) {
+    const matches = dinnerDeals
+      .filter((deal) => normalizeSearch(deal.firstName) === firstNameQuery)
+      .sort((a, b) => a.account.localeCompare(b.account));
+
+    if (!matches.length) {
+      return `I do not see a CMO Dinner lead with first name ${capitalize(firstNameQuery)}.`;
+    }
+
+    return [
+      `I found ${matches.length} CMO Dinner leads with first name ${capitalize(firstNameQuery)}:`,
+      ...matches.map((deal) => `- ${formatNameMatchLead(deal)}`),
+    ].join("\n");
+  }
 
   if (asksForHotLeads(normalized)) {
     if (!hotDeals.length) {
@@ -494,11 +510,15 @@ function relevanceScore(deal: SalesDeal, tokens: string[]) {
   const account = normalizeSearch(deal.account);
   const email = normalizeSearch(deal.email);
   const website = normalizeSearch(deal.website);
-  const searchable = `${account} ${email} ${website}`;
+  const firstName = normalizeSearch(deal.firstName);
+  const lastName = normalizeSearch(deal.lastName);
+  const searchable = `${account} ${email} ${website} ${firstName} ${lastName}`;
   let score = 0;
 
   for (const token of tokens) {
     if (account && account === token) score += 100;
+    if (firstName && firstName === token) score += 90;
+    if (lastName && lastName === token) score += 80;
     else if (account && (account.includes(token) || token.includes(account))) score += 40;
     else if (searchable.includes(token)) score += 12;
   }
@@ -645,6 +665,14 @@ function asksAboutCmoDinner(normalizedQuestion: string) {
   );
 }
 
+function requestedFirstName(normalizedQuestion: string) {
+  const match =
+    normalizedQuestion.match(/\bfirst\s+name\s+([a-z][a-z'-]{1,30})\b/) ||
+    normalizedQuestion.match(/\bfirst\s+named\s+([a-z][a-z'-]{1,30})\b/);
+
+  return match ? normalizeSearch(match[1]) : "";
+}
+
 function asksForHotLeads(normalizedQuestion: string) {
   return /\b(hot|hottest|high signal|priority|excited|important|best|top)\b/.test(normalizedQuestion);
 }
@@ -707,6 +735,23 @@ function formatCmoDinnerLead(deal: SalesDeal) {
   ].filter(Boolean);
 
   return `${deal.account}${details.length ? `: ${details.join(", ")}` : ""}`;
+}
+
+function formatNameMatchLead(deal: SalesDeal) {
+  const contact = [deal.firstName, deal.lastName].filter(usableField).join(" ");
+  const details = [
+    contact ? `contact ${contact}` : "",
+    deal.account ? `company ${deal.account}` : "",
+    usableField(deal.email) ? `email ${deal.email}` : "",
+    usableField(deal.website) ? `website ${deal.website}` : "",
+    deal.owner && deal.owner !== "Unassigned" ? `owner ${deal.owner}` : "",
+  ].filter(Boolean);
+
+  return details.join("; ");
+}
+
+function capitalize(value: string) {
+  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
 }
 
 function dinnerSignal(deal: SalesDeal) {
