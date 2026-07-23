@@ -5,7 +5,7 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "npm run start -- --port ${PORT:-3000} --hostname 0.0.0.0",
+    "startCommand": "WRANGLER_LOG_PATH=.wrangler/wrangler.log ./node_modules/.bin/vinext start --port ${PORT:-3000} --hostname 0.0.0.0",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
