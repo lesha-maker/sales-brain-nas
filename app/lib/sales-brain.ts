@@ -119,6 +119,7 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
   const upcomingCalls = upcomingBookedMeetings(deals);
   const todaysCalls = bookedMeetingsOn(deals, todayInSingapore());
   const noShowRate = noShowRateForLastSevenDays(deals);
+  const dateRange = requestedDateRange(normalized);
 
   if (normalized.includes("stuck") || normalized.includes("risk")) {
     return [
@@ -178,6 +179,23 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
       : `I found ${matches.length} calls today:`;
 
     return [heading, ...matches.map(formatDetailedCallItem)].join("\n\n");
+  }
+
+  if (dateRange && asksAboutCallsInDateRange(normalized)) {
+    const rangeCalls = callsScheduledBetween(deals, dateRange.startDate, dateRange.endDate);
+    const noShowCalls = rangeCalls.filter(isNoShowDeal);
+    const rate = rangeCalls.length ? noShowCalls.length / rangeCalls.length : 0;
+    const lines = [
+      `From ${friendlyDate(dateRange.startDate)} to ${friendlyDate(dateRange.endDate)}, ${rangeCalls.length} calls were scheduled.`,
+    ];
+
+    if (asksAboutNoShowRate(normalized) || /\b(no\s*show|no-show|noshow)\b/.test(normalized)) {
+      lines.push(
+        `${noShowCalls.length} of them were no-shows, so the no-show rate was ${(rate * 100).toFixed(1)}%.`,
+      );
+    }
+
+    return lines.join("\n");
   }
 
   if (asksAboutNoShowRate(normalized)) {
@@ -493,7 +511,7 @@ function buildCrmSummary(
       rate: noShowRate.rateLabel,
       definition:
         "scheduledCount is records with firstMeetingDate in the last 7 calendar days including today; noShowCount is those records where callStage, nextStepsStatus, or finalVerdict is No Show.",
-      noShowDeals: noShowRate.noShowDeals.slice(0, 20).map(toCrmDealSummary),
+      noShowDeals: topDeals(noShowRate.noShowDeals, 20),
     },
     lateStageClosing,
     proposalDone,
@@ -690,6 +708,13 @@ function asksForCallDetails(normalizedQuestion: string) {
       normalizedQuestion,
     ) &&
     /\b(call|calls|meeting|meetings)\b/.test(normalizedQuestion)
+  );
+}
+
+function asksAboutCallsInDateRange(normalizedQuestion: string) {
+  return (
+    /\b(call|calls|meeting|meetings)\b/.test(normalizedQuestion) &&
+    /\b(from|between|since|to|until|-)\b/.test(normalizedQuestion)
   );
 }
 
@@ -972,10 +997,68 @@ function noShowRateForLastSevenDays(deals: SalesDeal[]) {
   };
 }
 
+function callsScheduledBetween(deals: SalesDeal[], startDate: string, endDate: string) {
+  return deals
+    .filter((deal) => {
+      const meetingDate = dateOnly(deal.firstMeetingDate);
+      return meetingDate ? meetingDate >= startDate && meetingDate <= endDate : false;
+    })
+    .sort((a, b) => dateOnly(a.firstMeetingDate).localeCompare(dateOnly(b.firstMeetingDate)));
+}
+
 function isNoShowDeal(deal: SalesDeal) {
   return [deal.callStage, deal.nextStepsStatus, deal.finalVerdict].some(
     (value) => value === "No Show",
   );
+}
+
+function requestedDateRange(normalizedQuestion: string) {
+  const explicitRange =
+    normalizedQuestion.match(
+      /\b(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)\s+(?:to|until|-|through)\s+(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)\b/,
+    ) ||
+    normalizedQuestion.match(
+      /\b([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(?:to|until|-|through)\s+([a-z]+)?\s*(\d{1,2})(?:st|nd|rd|th)?\b/,
+    );
+
+  if (explicitRange?.[1] && explicitRange?.[2] && explicitRange?.[3]) {
+    const range = dateRangeFromMatch(explicitRange);
+    if (range) return range;
+  }
+
+  const sinceMatch = normalizedQuestion.match(
+    /\bsince\s+(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)\b/,
+  );
+
+  if (sinceMatch) {
+    const startDate = dateFromDayMonth(sinceMatch[1], sinceMatch[2]);
+    if (startDate) return { startDate, endDate: todayInSingapore() };
+  }
+
+  return null;
+}
+
+function dateRangeFromMatch(match: RegExpMatchArray) {
+  if (/^\d+$/.test(match[1]) && /^[a-z]+$/.test(match[2]) && /^\d+$/.test(match[3])) {
+    const startDate = dateFromDayMonth(match[1], match[2]);
+    const endDate = dateFromDayMonth(match[3], match[4] || match[2]);
+    return startDate && endDate ? sortDateRange(startDate, endDate) : null;
+  }
+
+  const startDate = dateFromDayMonth(match[2], match[1]);
+  const endDate = dateFromDayMonth(match[4], match[3] || match[1]);
+  return startDate && endDate ? sortDateRange(startDate, endDate) : null;
+}
+
+function dateFromDayMonth(day: string, month: string) {
+  const monthValue = monthNumber(month);
+  if (!monthValue) return "";
+
+  return `${todayInSingapore().slice(0, 4)}-${monthValue}-${day.padStart(2, "0")}`;
+}
+
+function sortDateRange(startDate: string, endDate: string) {
+  return startDate <= endDate ? { startDate, endDate } : { startDate: endDate, endDate: startDate };
 }
 
 function daysAgoInSingapore(days: number) {
