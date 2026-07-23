@@ -553,7 +553,7 @@ function mondayUpdateIntent(
   const combined = `${recentUserText} ${normalized}`;
   const mentionsAgreement = combined.includes("agreement");
   const mentionsMeetingBooked =
-    /\b(meeting booked|booked meeting|booked a meeting)\b/.test(combined);
+    /\b(meeting\s+booked|booked\s+(?:a\s+)?meeting)\b/.test(combined);
   const currentMessageHasUpdateVerb = /\b(move|update|change|set|put|make)\b/.test(normalized);
   const recentMessageHadUpdateVerb = /\b(move|update|change|set|put|make)\b/.test(recentUserText);
   const currentMessageLooksLikeSelection = searchTokens(normalized).length > 0;
