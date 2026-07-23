@@ -38,6 +38,15 @@ type LarkEventPayload = {
       message_type?: string;
       content?: string;
       chat_type?: string;
+      mentions?: Array<{
+        key?: string;
+        name?: string;
+        id?: {
+          open_id?: string;
+          union_id?: string;
+          user_id?: string;
+        };
+      }>;
     };
   };
 };
@@ -75,6 +84,10 @@ export async function POST(request: NextRequest) {
 
   if (!messageId || message?.message_type !== "text") {
     return NextResponse.json({ ok: true, ignored: "non-text-message" });
+  }
+
+  if (!shouldAnswerLarkMessage(message)) {
+    return NextResponse.json({ ok: true, ignored: "group-message-without-mention" });
   }
 
   const isFirstDelivery = await registerLarkMessageDelivery(messageId);
@@ -136,10 +149,46 @@ function parseTextContent(content?: string) {
 
   try {
     const parsed = JSON.parse(content) as { text?: string };
-    return parsed.text?.replace(/@\S+\s*/g, "").trim() ?? "";
+    return removeBotMentions(parsed.text ?? "");
   } catch {
-    return content.trim();
+    return removeBotMentions(content);
   }
+}
+
+function shouldAnswerLarkMessage(message: NonNullable<LarkEventPayload["event"]>["message"]) {
+  if (!isGroupChat(message?.chat_type)) return true;
+
+  return isBotMentioned(message);
+}
+
+function isGroupChat(chatType?: string) {
+  const normalized = chatType?.toLowerCase() ?? "";
+  return normalized.includes("group") || normalized === "chat";
+}
+
+function isBotMentioned(message: NonNullable<LarkEventPayload["event"]>["message"]) {
+  const mentions = message?.mentions ?? [];
+
+  if (
+    mentions.some((mention) => {
+      const label = `${mention.name ?? ""} ${mention.key ?? ""}`.toLowerCase();
+      return label.includes("harry") || label.includes("sales agent");
+    })
+  ) {
+    return true;
+  }
+
+  const rawContent = message?.content ?? "";
+  return /<at\b/i.test(rawContent) && /\b(harry|sales agent)\b/i.test(rawContent);
+}
+
+function removeBotMentions(text: string) {
+  return text
+    .replace(/<at\b[^>]*>.*?<\/at>/gi, " ")
+    .replace(/@\s*Harry the sales agent\b/gi, " ")
+    .replace(/@\s*Harry\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function conversationThreadId(message: NonNullable<LarkEventPayload["event"]>["message"]) {
