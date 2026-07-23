@@ -338,6 +338,7 @@ async function maybeHandleMondayWrite({
   }
 
   const deal = matches[0];
+  const updateBody = updateBodyForIntent(updateIntent, question);
   const action = {
     id: `${Date.now()}-${deal.id}`,
     createdAt: new Date().toISOString(),
@@ -347,6 +348,7 @@ async function maybeHandleMondayWrite({
     email: deal.email,
     description: updateIntent.description,
     columnValues: columnValuesForUpdateIntent(updateIntent, deal),
+    ...(updateBody ? { updateBody } : {}),
   } satisfies PendingMondayAction;
 
   if (hasApprovalLanguage(question)) {
@@ -430,6 +432,9 @@ function recoverPendingMondayAction({
     email: deal.email,
     description: updateIntent.description,
     columnValues: columnValuesForUpdateIntent(updateIntent, deal),
+    ...(updateBodyForIntent(updateIntent, latestUpdateRequest)
+      ? { updateBody: updateBodyForIntent(updateIntent, latestUpdateRequest) }
+      : {}),
   } satisfies PendingMondayAction;
 }
 
@@ -551,8 +556,13 @@ function mondayUpdateIntent(
     .toLowerCase();
 
   const combined = `${recentUserText} ${normalized}`;
-  const mentionsAgreement = combined.includes("agreement");
-  const mentionsMeetingBooked =
+  const currentMentionsAgreement = normalized.includes("agreement");
+  const contextMentionsAgreement = combined.includes("agreement");
+  const currentMentionsLost = /\blost\b/.test(normalized);
+  const contextMentionsLost = /\blost\b/.test(combined);
+  const currentMentionsMeetingBooked =
+    /\b(meeting\s+booked|booked\s+(?:a\s+)?meeting)\b/.test(normalized);
+  const contextMentionsMeetingBooked =
     /\b(meeting\s+booked|booked\s+(?:a\s+)?meeting)\b/.test(combined);
   const currentMessageHasUpdateVerb = /\b(move|update|change|set|put|make)\b/.test(normalized);
   const recentMessageHadUpdateVerb = /\b(move|update|change|set|put|make)\b/.test(recentUserText);
@@ -564,19 +574,27 @@ function mondayUpdateIntent(
 
   if (!isUpdate) return null;
 
-  if (mentionsMeetingBooked) {
+  if (currentMentionsLost || (!currentMentionsAgreement && !currentMentionsMeetingBooked && contextMentionsLost)) {
     return {
-      kind: "meeting-booked",
-      description: "moved Call Stage to Meeting Booked",
-      confirmationText: "move Call Stage to Meeting Booked in monday",
+      kind: "lost",
+      description: "moved Final verdict to Lost",
+      confirmationText: "move Final verdict to Lost in monday",
     };
   }
 
-  if (mentionsAgreement) {
+  if (currentMentionsAgreement || (!currentMentionsMeetingBooked && contextMentionsAgreement)) {
     return {
       kind: "agreement-stage",
       description: "moved Final verdict to Agreement Stage",
       confirmationText: "move Final verdict to Agreement Stage in monday",
+    };
+  }
+
+  if (currentMentionsMeetingBooked || contextMentionsMeetingBooked) {
+    return {
+      kind: "meeting-booked",
+      description: "moved Call Stage to Meeting Booked",
+      confirmationText: "move Call Stage to Meeting Booked in monday",
     };
   }
 
@@ -596,8 +614,26 @@ function columnValuesForUpdateIntent(
   }
 
   return {
-    [finalVerdictColumnIdFor(deal)]: { label: "Agreement Stage" },
+    [finalVerdictColumnIdFor(deal)]: {
+      label: updateIntent.kind === "lost" ? "Lost" : "Agreement Stage",
+    },
   };
+}
+
+function updateBodyForIntent(
+  updateIntent: NonNullable<ReturnType<typeof mondayUpdateIntent>>,
+  question: string,
+) {
+  const note = extractMondayUpdateNote(question);
+
+  if (!note) return "";
+
+  return `Sales Brain update: ${updateIntent.description}.\n\nNote from Lark:\n${note}`;
+}
+
+function extractMondayUpdateNote(question: string) {
+  const match = question.match(/\b(?:notes?|thread)\s*:\s*(.+)$/i);
+  return match?.[1]?.trim() || "";
 }
 
 function callStageColumnIdFor(deal: SalesDeal) {
@@ -663,6 +699,9 @@ function findDealMatches({
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
 
+  const exactNameMatch = singleExactNameMatch(ranked, question);
+  if (exactNameMatch) return [exactNameMatch.deal];
+
   const exactAccountMatch = singleStrongAccountMatch(ranked, tokens);
   if (exactAccountMatch) return [exactAccountMatch.deal];
 
@@ -670,6 +709,21 @@ function findDealMatches({
   if (confidentMatch) return [confidentMatch.deal];
 
   return ranked.map((item) => item.deal);
+}
+
+function singleExactNameMatch(ranked: Array<{ deal: SalesDeal; score: number }>, question: string) {
+  const normalizedQuestion = normalizeSearch(question);
+  const matches = ranked.filter(({ deal }) => {
+    const account = normalizeSearch(deal.account);
+    const contact = normalizeSearch(`${deal.firstName}${deal.lastName}`);
+
+    return (
+      (account.length >= 4 && normalizedQuestion.includes(account)) ||
+      (contact.length >= 4 && normalizedQuestion.includes(contact))
+    );
+  });
+
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function singleStrongAccountMatch(
