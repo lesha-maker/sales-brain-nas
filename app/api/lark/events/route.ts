@@ -433,7 +433,15 @@ async function maybeHandleSalesMemoryCapture({
 
 function isConfirmation(question: string) {
   const normalized = question.trim().toLowerCase();
-  return /^(yes|yes pls|yes please|yep|yeah|confirm|approved|approve|do it|go ahead|ok|okay)$/i.test(
+  const words = normalized.split(/\s+/).filter(Boolean);
+
+  if (!normalized || words.length > 6) return false;
+  if (/\b(no|nope|not|don't|dont|stop|cancel|wait)\b/.test(normalized)) return false;
+  if (/\b(can you|how many|what|which|who|list|show|tell|give)\b/.test(normalized)) {
+    return false;
+  }
+
+  return /\b(yes|yep|yeah|confirm|approved|approve|do it|go ahead|ok|okay)\b/i.test(
     normalized,
   );
 }
