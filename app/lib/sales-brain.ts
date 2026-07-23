@@ -280,7 +280,7 @@ async function askOpenAI({
                 "Do not use markdown formatting, bold text, code ticks, bullet points, or CRM jargon unless the user asks for a detailed report.",
                 "Say 'sales qualified' instead of 'Call Stage = Sales Qualified' unless the exact field name matters.",
                 "When the user asks how many calls are coming up, upcoming calls, or booked calls, count only CRM records where callStage is 'Booked a Meeting' and firstMeetingDate is today or later in Asia/Singapore.",
-                "When giving details about specific calls or meetings, always include the company website when it is present in the CRM.",
+                "When giving details about specific calls or meetings, always include the company website when it is present in the CRM and label times as SGT.",
                 "When the user mentions CMO dinner, dinner leads, Miami dinner, Singapore dinner, or Tel Aviv, use only the CMO Dinner board records. In this CRM summary those are in crmSummary.cmoDinner.",
                 "Use the recent conversation to understand follow-up questions. For example, if the user asks for 'the list', infer the list from the previous answer.",
                 "If the follow-up is ambiguous, make your best inference from the recent conversation and say what you assumed.",
@@ -872,7 +872,7 @@ function friendlyDate(value: string) {
 
 function friendlyDateTime(value: string) {
   const time = timeOnly(value);
-  return time || friendlyDate(value);
+  return time ? `${time} SGT` : friendlyDate(value);
 }
 
 function timeOnly(value: string) {
