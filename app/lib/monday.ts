@@ -471,17 +471,25 @@ function estimatedBudgetValue(budget: string) {
 
   if (!normalized) return 0;
   if (normalized.includes("less than") || normalized.includes("<")) return 5000;
+  const amounts = [...normalized.matchAll(/(\d+(?:[.,]\d+)?)\s*(k|m|mm|million)?\b/g)].map(
+    (match) => {
+      const amount = Number(match[1].replace(",", "."));
+      const unit = match[2] || "k";
 
-  const numbers = normalized
-    .match(/\d+(?:,\d+)?/g)
-    ?.map((part) => Number(part.replace(",", ""))) ?? [];
+      if (unit === "m" || unit === "mm" || unit === "million") {
+        return amount * 1_000_000;
+      }
 
-  if (numbers.length >= 2) {
-    return Math.round((numbers[0] + numbers[1]) / 2) * 1000;
+      return amount * 1_000;
+    },
+  );
+
+  if (amounts.length >= 2) {
+    return Math.round((amounts[0] + amounts[1]) / 2);
   }
 
-  if (numbers.length === 1) {
-    return numbers[0] * 1000;
+  if (amounts.length === 1) {
+    return Math.round(amounts[0]);
   }
 
   return 0;

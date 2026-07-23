@@ -30,6 +30,7 @@ export async function answerSalesQuestion({
   const fallback = deterministicSalesAnswer(question, deals);
   const directAnswer = directSpecificLeadAnswer({ question, deals, conversation });
   const cmoDinnerAnswer = directCmoDinnerAnswer(question, deals);
+  const normalized = question.toLowerCase();
 
   if (directAnswer) {
     return directAnswer;
@@ -37,6 +38,10 @@ export async function answerSalesQuestion({
 
   if (cmoDinnerAnswer) {
     return cmoDinnerAnswer;
+  }
+
+  if (asksAboutMillionPlusNeverBooked(normalized)) {
+    return fallback;
   }
 
   if (!process.env.OPENAI_API_KEY) {
@@ -129,6 +134,25 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
 
   if (normalized.includes("sales qualified")) {
     return `We have ${salesQualified.length} sales qualified leads right now.`;
+  }
+
+  if (asksAboutMillionPlusNeverBooked(normalized)) {
+    const matches = deals
+      .filter(isMillionPlusLead)
+      .filter(hasNeverBookedCall)
+      .sort((a, b) => b.value - a.value);
+
+    if (!matches.length) {
+      return "I do not see any $1M+ leads that have never booked a call.";
+    }
+
+    return [
+      `I found ${matches.length} $1M+ leads that have never booked a call:`,
+      ...matches.slice(0, 25).map(formatLeadListItem),
+      matches.length > 25 ? `And ${matches.length - 25} more.` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   if (asksAboutUpcomingCalls(normalized)) {
@@ -552,6 +576,21 @@ function asksAboutUpcomingCalls(normalizedQuestion: string) {
   return mentionsCall && mentionsUpcoming;
 }
 
+function asksAboutMillionPlusNeverBooked(normalizedQuestion: string) {
+  const mentionsMillionPlus =
+    /\b1\s*m\+?\b/.test(normalizedQuestion) ||
+    /\b1m\+?\b/.test(normalizedQuestion) ||
+    /\$1\s*m\+?/.test(normalizedQuestion) ||
+    /\b1\s*million\+?\b/.test(normalizedQuestion) ||
+    /\$1\s*million\+?/.test(normalizedQuestion);
+  const mentionsNeverBooked =
+    /\bnever\b/.test(normalizedQuestion) &&
+    /\b(booked|scheduled|had)\b/.test(normalizedQuestion) &&
+    /\b(call|meeting)\b/.test(normalizedQuestion);
+
+  return mentionsMillionPlus && mentionsNeverBooked;
+}
+
 function asksAboutInboundQualifiedLeads(normalizedQuestion: string) {
   return (
     /\binbound\b/.test(normalizedQuestion) &&
@@ -658,6 +697,33 @@ function dinnerSignal(deal: SalesDeal) {
 function isOutbound(deal: SalesDeal) {
   if (deal.group) return deal.group === "Outbound Leads";
   return deal.source?.toLowerCase().includes("outbound") || false;
+}
+
+function isMillionPlusLead(deal: SalesDeal) {
+  if (deal.value >= 1_000_000) return true;
+
+  const budget = deal.budget.toLowerCase();
+  return /\b\d+(?:\.\d+)?\s*(?:m|mm|million)\s*\+/.test(budget);
+}
+
+function hasNeverBookedCall(deal: SalesDeal) {
+  return (
+    !["Booked a Meeting", "Meeting Booked", "No Show", "Cancelled"].includes(deal.callStage) &&
+    !dateOnly(deal.firstMeetingDate) &&
+    !dateOnly(deal.latestMeetingDate)
+  );
+}
+
+function formatLeadListItem(deal: SalesDeal) {
+  const details = [
+    deal.email,
+    deal.budget && deal.budget !== "Unknown" ? deal.budget : "",
+    deal.country,
+    deal.owner && deal.owner !== "Unassigned" ? `owner ${deal.owner}` : "",
+    deal.callStage && deal.callStage !== "5" ? deal.callStage : "",
+  ].filter(Boolean);
+
+  return `- ${deal.account}${details.length ? `: ${details.join(", ")}` : ""}`;
 }
 
 function upcomingBookedMeetings(deals: SalesDeal[]) {
