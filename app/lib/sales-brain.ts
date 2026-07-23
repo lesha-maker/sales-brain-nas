@@ -40,7 +40,7 @@ export async function answerSalesQuestion({
     return cmoDinnerAnswer;
   }
 
-  if (asksAboutMillionPlusNeverBooked(normalized) || asksAboutTodaysCallsWithDetails(normalized)) {
+  if (asksAboutMillionPlusNeverBooked(normalized) || asksAboutTodaysCalls(normalized)) {
     return fallback;
   }
 
@@ -156,7 +156,7 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
       .join("\n");
   }
 
-  if (asksAboutTodaysCallsWithDetails(normalized)) {
+  if (asksAboutTodaysCalls(normalized)) {
     const ownerFilter = requestedOwner(normalized);
     const matches = ownerFilter
       ? todaysCalls.filter((deal) => ownerMatches(deal, ownerFilter))
@@ -280,6 +280,7 @@ async function askOpenAI({
                 "Do not use markdown formatting, bold text, code ticks, bullet points, or CRM jargon unless the user asks for a detailed report.",
                 "Say 'sales qualified' instead of 'Call Stage = Sales Qualified' unless the exact field name matters.",
                 "When the user asks how many calls are coming up, upcoming calls, or booked calls, count only CRM records where callStage is 'Booked a Meeting' and firstMeetingDate is today or later in Asia/Singapore.",
+                "When giving details about specific calls or meetings, always include the company website when it is present in the CRM.",
                 "When the user mentions CMO dinner, dinner leads, Miami dinner, Singapore dinner, or Tel Aviv, use only the CMO Dinner board records. In this CRM summary those are in crmSummary.cmoDinner.",
                 "Use the recent conversation to understand follow-up questions. For example, if the user asks for 'the list', infer the list from the previous answer.",
                 "If the follow-up is ambiguous, make your best inference from the recent conversation and say what you assumed.",
@@ -596,11 +597,10 @@ function asksAboutUpcomingCalls(normalizedQuestion: string) {
   return mentionsCall && mentionsUpcoming;
 }
 
-function asksAboutTodaysCallsWithDetails(normalizedQuestion: string) {
+function asksAboutTodaysCalls(normalizedQuestion: string) {
   return (
     /\btoday\b/.test(normalizedQuestion) &&
-    /\b(call|calls|meeting|meetings)\b/.test(normalizedQuestion) &&
-    /\b(company|budget|qualifier|agent|says|notes|info|assigned)\b/.test(normalizedQuestion)
+    /\b(call|calls|meeting|meetings)\b/.test(normalizedQuestion)
   );
 }
 
