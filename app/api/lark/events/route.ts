@@ -61,6 +61,9 @@ type LarkEventPayload = {
 };
 
 const FINAL_VERDICT_COLUMN_ID = "color_mm594jh8";
+const CALL_STAGE_COLUMN_ID = "color_mm4j8pct";
+const CMO_DINNER_FINAL_VERDICT_COLUMN_ID = "color_mm5grmg3";
+const CMO_DINNER_AFTER_DINNER_STATUS_COLUMN_ID = "color_mm5gctyq";
 
 export async function POST(request: NextRequest) {
   const payload = (await request.json()) as LarkEventPayload;
@@ -329,7 +332,9 @@ async function maybeHandleMondayWrite({
     return `Done - I updated ${action.account}${email} in monday: ${action.description}.`;
   }
 
-  if (!isAgreementStageUpdateIntent(question, conversation)) {
+  const updateIntent = mondayUpdateIntent(question, conversation);
+
+  if (!updateIntent) {
     return "";
   }
 
@@ -347,7 +352,6 @@ async function maybeHandleMondayWrite({
   }
 
   const deal = matches[0];
-  const description = "moved Final verdict to Agreement Stage";
 
   await setPendingMondayAction(threadId, {
     id: `${Date.now()}-${deal.id}`,
@@ -356,19 +360,16 @@ async function maybeHandleMondayWrite({
     itemId: deal.id,
     account: deal.account,
     email: deal.email,
-    description,
-    columnValues: {
-      [FINAL_VERDICT_COLUMN_ID]: { label: "Agreement Stage" },
-    },
+    description: updateIntent.description,
+    columnValues: columnValuesForUpdateIntent(updateIntent, deal),
   });
 
   const currentStage = [deal.callStage, deal.nextStepsStatus, deal.finalVerdict]
     .filter((value) => value && value !== "5")
     .join(", ");
-  const email = deal.email ? ` (${deal.email})` : "";
   const stageText = currentStage ? ` It is currently at ${currentStage}.` : "";
 
-  return `I found ${deal.account}${email}.${stageText} Reply yes to confirm, and I'll move it to Agreement Stage in monday.`;
+  return `I found ${formatSelectedDeal(deal)}.${stageText} Reply yes to confirm, and I'll ${updateIntent.confirmationText}.`;
 }
 
 async function maybeHandleSalesMemoryCapture({
@@ -459,14 +460,14 @@ function extractSalesMemoryNote(question: string) {
     .trim();
 }
 
-function isAgreementStageUpdateIntent(
+function mondayUpdateIntent(
   question: string,
   conversation: ConversationMessage[],
 ) {
   const normalized = question.toLowerCase();
 
   if (isReadOnlySalesQuestion(normalized)) {
-    return false;
+    return null;
   }
 
   const recentUserText = conversation
@@ -478,16 +479,64 @@ function isAgreementStageUpdateIntent(
 
   const combined = `${recentUserText} ${normalized}`;
   const mentionsAgreement = combined.includes("agreement");
+  const mentionsMeetingBooked =
+    /\b(meeting booked|booked meeting|booked a meeting)\b/.test(combined);
   const currentMessageHasUpdateVerb = /\b(move|update|change|set|put)\b/.test(normalized);
   const recentMessageHadUpdateVerb = /\b(move|update|change|set|put)\b/.test(recentUserText);
   const currentMessageLooksLikeSelection = searchTokens(normalized).length > 0;
   const currentMessageLooksShort = searchTokens(normalized).length <= 3;
+  const isUpdate =
+    currentMessageHasUpdateVerb ||
+    (recentMessageHadUpdateVerb && currentMessageLooksLikeSelection && currentMessageLooksShort);
 
-  return (
-    mentionsAgreement &&
-    (currentMessageHasUpdateVerb ||
-      (recentMessageHadUpdateVerb && currentMessageLooksLikeSelection && currentMessageLooksShort))
-  );
+  if (!isUpdate) return null;
+
+  if (mentionsMeetingBooked) {
+    return {
+      kind: "meeting-booked",
+      description: "moved Call Stage to Meeting Booked",
+      confirmationText: "move Call Stage to Meeting Booked in monday",
+    };
+  }
+
+  if (mentionsAgreement) {
+    return {
+      kind: "agreement-stage",
+      description: "moved Final verdict to Agreement Stage",
+      confirmationText: "move Final verdict to Agreement Stage in monday",
+    };
+  }
+
+  return null;
+}
+
+function columnValuesForUpdateIntent(
+  updateIntent: NonNullable<ReturnType<typeof mondayUpdateIntent>>,
+  deal: SalesDeal,
+) {
+  if (updateIntent.kind === "meeting-booked") {
+    return {
+      [callStageColumnIdFor(deal)]: {
+        label: isCmoDinnerDeal(deal) ? "Meeting Booked" : "Booked a Meeting",
+      },
+    };
+  }
+
+  return {
+    [finalVerdictColumnIdFor(deal)]: { label: "Agreement Stage" },
+  };
+}
+
+function callStageColumnIdFor(deal: SalesDeal) {
+  return isCmoDinnerDeal(deal) ? CMO_DINNER_AFTER_DINNER_STATUS_COLUMN_ID : CALL_STAGE_COLUMN_ID;
+}
+
+function finalVerdictColumnIdFor(deal: SalesDeal) {
+  return isCmoDinnerDeal(deal) ? CMO_DINNER_FINAL_VERDICT_COLUMN_ID : FINAL_VERDICT_COLUMN_ID;
+}
+
+function isCmoDinnerDeal(deal: SalesDeal) {
+  return deal.boardId === "5030120019" || (deal.boardName || "").toLowerCase().includes("cmo dinner");
 }
 
 function isReadOnlySalesQuestion(normalized: string) {
@@ -519,6 +568,7 @@ function findDealMatches({
   const directTokens = searchTokens(question);
   const contextTokens = searchTokens([...recentUserMessages, question].join(" "));
   const tokens = directTokens.length ? directTokens : contextTokens;
+  const boardHint = boardContextHint([...recentUserMessages, question].join(" "));
 
   if (!tokens.length) return [];
 
@@ -526,10 +576,12 @@ function findDealMatches({
     .map((deal) => {
       const directScore = relevanceScore(deal, tokens);
       const contextBonus = directScore > 0 ? relevanceScore(deal, contextTokens) * 0.25 : 0;
+      const boardBonus =
+        boardHint && dealMatchesBoardHint(deal, boardHint) && directScore > 0 ? 40 : 0;
 
       return {
         deal,
-        score: directScore + contextBonus,
+        score: directScore + contextBonus + boardBonus,
       };
     })
     .filter((item) => item.score > 0)
@@ -543,19 +595,51 @@ function relevanceScore(deal: SalesDeal, tokens: string[]) {
   const firstName = normalizeSearch(deal.firstName);
   const lastName = normalizeSearch(deal.lastName);
   const website = normalizeSearch(deal.website);
-  const searchable = `${account} ${email} ${firstName} ${lastName} ${website}`;
+  const boardName = normalizeSearch(deal.boardName || "");
+  const searchable = `${account} ${email} ${firstName} ${lastName} ${website} ${boardName}`;
   let score = 0;
+  let matchedAccount = false;
+  let matchedExactAccount = false;
+  let matchedFirstName = false;
 
   for (const token of tokens) {
     if (email && email.includes(token)) score += 80;
-    if (firstName && firstName === token) score += 70;
+    if (firstName && firstName === token) {
+      score += 70;
+      matchedFirstName = true;
+    }
     if (lastName && lastName === token) score += 70;
-    if (account && account === token) score += 100;
-    else if (account && (account.includes(token) || token.includes(account))) score += 40;
+    if (account && account === token) {
+      score += 100;
+      matchedAccount = true;
+      matchedExactAccount = true;
+    } else if (account && (account.includes(token) || token.includes(account))) {
+      score += 40;
+      matchedAccount = true;
+    }
+    if (boardName && boardName.includes(token)) score += 8;
     else if (searchable.includes(token)) score += 12;
   }
 
+  if (matchedExactAccount && matchedFirstName) score += 150;
+  else if (matchedAccount && matchedFirstName) score += 20;
+
   return score;
+}
+
+function boardContextHint(text: string) {
+  const normalized = text.toLowerCase();
+
+  if (/\b(cmo|dinner)\b/.test(normalized)) return "cmo-dinner";
+  return "";
+}
+
+function dealMatchesBoardHint(deal: SalesDeal, hint: string) {
+  if (hint === "cmo-dinner") {
+    return deal.boardId === "5030120019" || (deal.boardName || "").toLowerCase().includes("cmo dinner");
+  }
+
+  return false;
 }
 
 function searchTokens(text: string) {
@@ -563,11 +647,18 @@ function searchTokens(text: string) {
     "agreement",
     "called",
     "confirm",
+    "company",
+    "dinner",
+    "from",
+    "lead",
+    "meeting",
     "monday",
     "move",
+    "one",
     "please",
     "stage",
     "status",
+    "that",
     "update",
   ]);
 
@@ -576,7 +667,7 @@ function searchTokens(text: string) {
       text
         .split(/[^a-zA-Z0-9@._-]+/)
         .map((token) => normalizeSearch(token))
-        .filter((token) => token.length >= 4 && !stopWords.has(token)),
+        .filter((token) => token.length >= 3 && !stopWords.has(token)),
     ),
   ];
 }
@@ -592,4 +683,12 @@ function formatDealOption(deal: SalesDeal) {
     .join(", ");
 
   return `${deal.account}${email}${status ? ` (${status})` : ""}`;
+}
+
+function formatSelectedDeal(deal: SalesDeal) {
+  const contact = [deal.firstName, deal.lastName].filter(Boolean).join(" ");
+  const email = deal.email ? `, ${deal.email}` : "";
+  const contactText = contact ? ` (${contact}${email})` : email ? ` (${deal.email})` : "";
+
+  return `${deal.account}${contactText}`;
 }
