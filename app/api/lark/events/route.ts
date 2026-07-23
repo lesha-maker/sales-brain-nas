@@ -642,10 +642,13 @@ function findDealMatches({
   const contextTokens = searchTokens([...recentUserMessages, question].join(" "));
   const tokens = directTokens.length ? directTokens : contextTokens;
   const boardHint = boardContextHint([...recentUserMessages, question].join(" "));
+  const candidateDeals = boardHint
+    ? deals.filter((deal) => dealMatchesBoardHint(deal, boardHint))
+    : deals;
 
   if (!tokens.length) return [];
 
-  const ranked = deals
+  const ranked = (candidateDeals.length ? candidateDeals : deals)
     .map((deal) => {
       const directScore = relevanceScore(deal, tokens);
       const contextBonus = directScore > 0 ? relevanceScore(deal, contextTokens) * 0.25 : 0;
@@ -660,10 +663,31 @@ function findDealMatches({
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
 
+  const exactAccountMatch = singleStrongAccountMatch(ranked, tokens);
+  if (exactAccountMatch) return [exactAccountMatch.deal];
+
   const confidentMatch = confidentSingleMatch(ranked);
   if (confidentMatch) return [confidentMatch.deal];
 
   return ranked.map((item) => item.deal);
+}
+
+function singleStrongAccountMatch(
+  ranked: Array<{ deal: SalesDeal; score: number }>,
+  tokens: string[],
+) {
+  const matches = ranked.filter(({ deal }) => {
+    const account = normalizeSearch(deal.account);
+
+    return tokens.some(
+      (token) =>
+        account === token ||
+        (token.length >= 4 && account.includes(token)) ||
+        (token.length >= 4 && token.includes(account) && account.length >= 4),
+    );
+  });
+
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function confidentSingleMatch(ranked: Array<{ deal: SalesDeal; score: number }>) {
@@ -736,7 +760,11 @@ function dealMatchesBoardHint(deal: SalesDeal, hint: string) {
 function searchTokens(text: string) {
   const stopWords = new Set([
     "agreement",
+    "action",
+    "booked",
+    "board",
     "called",
+    "cmo",
     "confirm",
     "company",
     "dinner",
@@ -745,12 +773,16 @@ function searchTokens(text: string) {
     "meeting",
     "monday",
     "move",
+    "make",
+    "no",
     "one",
     "please",
     "stage",
     "status",
     "that",
     "update",
+    "website",
+    "yes",
   ]);
 
   return [
