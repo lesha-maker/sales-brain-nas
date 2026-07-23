@@ -1198,6 +1198,9 @@ function todayInSingapore() {
 }
 
 function dateOnly(value: string) {
+  const isoDate = value.match(/\d{4}-\d{2}-\d{2}/);
+  if (isoDate) return isoDate[0];
+
   const monthDay = value.match(
     /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/i,
   );
@@ -1220,8 +1223,7 @@ function dateOnly(value: string) {
     }).format(parsed);
   }
 
-  const match = value.match(/\d{4}-\d{2}-\d{2}/);
-  return match?.[0] || "";
+  return "";
 }
 
 function friendlyDate(value: string) {
@@ -1242,6 +1244,9 @@ function friendlyDateTime(value: string) {
 }
 
 function timeOnly(value: string) {
+  const explicitTime = value.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (explicitTime) return `${explicitTime[1].padStart(2, "0")}:${explicitTime[2]}`;
+
   const parsed = Date.parse(value);
 
   if (!Number.isNaN(parsed)) {
@@ -1253,8 +1258,7 @@ function timeOnly(value: string) {
     }).format(parsed);
   }
 
-  const match = value.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
-  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : "";
+  return "";
 }
 
 function monthNumber(value: string) {
