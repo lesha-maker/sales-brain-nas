@@ -218,10 +218,11 @@ function removeBotMentions(text: string) {
 }
 
 function conversationThreadId(message: NonNullable<LarkEventPayload["event"]>["message"]) {
+  // Keep group replies and the main room in one memory stream.
   return (
+    message?.chat_id ||
     message?.root_id ||
     message?.parent_id ||
-    message?.chat_id ||
     message?.message_id ||
     "lark-default-thread"
   );
