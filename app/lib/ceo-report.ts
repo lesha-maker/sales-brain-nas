@@ -37,6 +37,8 @@ export function buildCeoSalesReport({
     `${pipeline.dinnerFollowUps.length} qualified follow-up meetings from our CMO dinners.`;
 
   const snapshotRows = pipelineSnapshotRows(pipeline);
+  const agreementRows = progressTableRows("Agreement Stage", pipeline.agreement.slice(0, 5));
+  const hotRows = progressTableRows("Hot Opportunities", pipeline.hot.slice(0, 10));
   const newEnterpriseRows = tableRows(
     ["Lead", "Signal", "Owner"],
     pipeline.newEnterprise.slice(0, 8).map((deal) => [
@@ -53,6 +55,7 @@ export function buildCeoSalesReport({
       conciseSignal(deal),
     ]),
   );
+  const dinnerRows = cmoDinnerTableRows(dinnerMarkets);
   const keyHighlights = [
     `${pipeline.agreement.length} deals are now at agreement stage and approaching signature.`,
     `${pipeline.activeEnterpriseCount} active enterprise opportunities remain in the late-stage pipeline.`,
@@ -69,8 +72,6 @@ export function buildCeoSalesReport({
     `CMO dinners are working as an enterprise acquisition channel, with ${pipeline.dinnerFollowUps.length} follow-up meetings captured.`,
     `Two leads for CEO follow-up: ${ceoFollowUpNames(pipeline)}.`,
   ];
-  const cmoDinnerFollowUpLines = dinnerFollowUpLines(dinnerMarkets);
-
   const paragraphs = [
     "Agent Sales Report",
     "Executive Summary",
@@ -92,7 +93,7 @@ export function buildCeoSalesReport({
     ...upcomingMeetingRows.map((row) => row.join(" | ")),
     "CMO Dinner Follow-ups",
     "The dinner strategy continues to convert into qualified enterprise meetings.",
-    ...cmoDinnerFollowUpLines,
+    ...dinnerRows.map((row) => row.join(" | ")),
     "CEO Takeaways",
     ...ceoTakeaways.map((line) => `- ${line}`),
   ];
@@ -111,22 +112,28 @@ export function buildCeoSalesReport({
     { type: "table", rows: snapshotRows },
     { type: "divider" },
     { type: "heading1", text: "Pipeline Progress Since Last Update" },
-    ...progressBlocks(progressLines),
+    { type: "heading2", text: "Agreement Stage" },
+    { type: "table", rows: agreementRows },
+    { type: "heading2", text: "Hot Opportunities" },
+    { type: "table", rows: hotRows },
+    { type: "text", text: movement.important.length
+      ? `Other movement worth noting: ${movement.important.slice(0, 4).map(formatChange).join("; ")}.`
+      : "Other movement worth noting: no major non-closing stage changes found this week." },
     { type: "divider" },
     { type: "heading1", text: "Commercial Decision Required" },
     { type: "text", text: commercialDecisionText(pipeline) },
     ...commercialDecisionLines(pipeline).map((text) => ({ type: "text" as const, text })),
     { type: "divider" },
     { type: "heading1", text: "New Enterprise Opportunities" },
-    ...rowsToBullets(newEnterpriseRows),
+    { type: "table", rows: newEnterpriseRows },
     { type: "divider" },
     { type: "heading1", text: "Upcoming Enterprise Meetings" },
     { type: "text", text: `${pipeline.upcomingMeetings.length} enterprise conversations have been scheduled. Calls we are excited about.` },
-    ...rowsToBullets(upcomingMeetingRows),
+    { type: "table", rows: upcomingMeetingRows },
     { type: "divider" },
     { type: "heading1", text: "CMO Dinner Follow-ups" },
     { type: "text", text: "The dinner strategy continues to convert into qualified enterprise meetings." },
-    ...cmoDinnerBlocks(dinnerMarkets),
+    { type: "table", rows: dinnerRows },
     { type: "divider" },
     { type: "heading1", text: "CEO Takeaways" },
     ...ceoTakeaways.map((text) => ({ type: "text" as const, text: `- ${text}` })),
@@ -139,23 +146,6 @@ export function buildCeoSalesReport({
     sheetValues: paragraphs.map((paragraph) => [paragraph]),
     plainText: paragraphs.join("\n\n"),
   };
-}
-
-function progressBlocks(lines: string[]): LarkReportBlock[] {
-  return lines.map((text) => {
-    if (text === "Agreement Stage" || text === "Hot Opportunities") {
-      return {
-        type: "heading2",
-        text: text === "Agreement Stage" ? "🟣 Agreement Stage" : "🔴 Hot Opportunities",
-      };
-    }
-
-    if (text.startsWith("- ")) {
-      return { type: "text", text };
-    }
-
-    return { type: "text", text };
-  });
 }
 
 function healthIcon(health: string) {
@@ -178,26 +168,27 @@ function commercialDecisionLines(pipeline: PipelineSet) {
   return lines;
 }
 
-function dinnerFollowUpLines(dinnerMarkets: Array<[string, SalesDeal[]]>) {
-  return dinnerMarkets.flatMap(([market, marketDeals]) => [
-    marketLabel(market),
-    ...marketDeals.slice(0, 8).map((deal) => `- ${cleanName(deal.account)}${dinnerAction(deal)}`),
-    `Total: ${marketDeals.length} follow-up meeting${marketDeals.length === 1 ? "" : "s"}`,
-  ]);
+function progressTableRows(section: string, deals: SalesDeal[]) {
+  return tableRows(
+    ["Lead", "Stage", "What CEO Should Know"],
+    deals.map((deal) => [
+      cleanName(deal.account),
+      section === "Agreement Stage" ? "Agreement Stage" : stageFor(deal),
+      progressNote(deal),
+    ]),
+  );
 }
 
-function cmoDinnerBlocks(dinnerMarkets: Array<[string, SalesDeal[]]>): LarkReportBlock[] {
-  return dinnerMarkets.flatMap(([market, marketDeals]) => [
-    { type: "heading3" as const, text: marketLabel(market) },
-    ...marketDeals.slice(0, 8).map((deal) => ({
-      type: "text" as const,
-      text: `- ${cleanName(deal.account)}${dinnerAction(deal)}`,
-    })),
-    {
-      type: "text" as const,
-      text: `Total: ${marketDeals.length} follow-up meeting${marketDeals.length === 1 ? "" : "s"}`,
-    },
-  ]);
+function cmoDinnerTableRows(dinnerMarkets: Array<[string, SalesDeal[]]>) {
+  const rows = dinnerMarkets.flatMap(([market, marketDeals]) =>
+    marketDeals.slice(0, 8).map((deal) => [
+      marketLabel(market),
+      cleanName(deal.account),
+      [cleanOwner(deal.owner), dinnerAction(deal).replace(/^ — /, "")].filter(Boolean).join(" / "),
+    ]),
+  );
+
+  return tableRows(["Market", "Lead", "Owner / Status"], rows);
 }
 
 function marketLabel(market: string) {
@@ -213,17 +204,6 @@ function dinnerAction(deal: SalesDeal) {
     .find((value) => value && value !== "5" && value !== "No Action" && value !== "Blank");
 
   return signal ? ` — ${signal}` : "";
-}
-
-function rowsToBullets(rows: string[][]): LarkReportBlock[] {
-  const [header, ...body] = rows;
-
-  return body.map((row) => {
-    const [first, ...rest] = row;
-    const details = rest.filter(Boolean).join(" — ");
-    const text = details ? `${first}: ${details}` : first || header?.[0] || "";
-    return { type: "text", text: `- ${text}` };
-  });
 }
 
 function buildPipelineSet(deals: SalesDeal[], recentChanges: SalesMemoryChange[]): PipelineSet {
