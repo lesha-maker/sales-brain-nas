@@ -41,6 +41,7 @@ export async function answerSalesQuestion({
   }
 
   if (
+    asksAboutCallsInDateRange(normalized) ||
     asksAboutFitLeadsCreatedInRange(normalized) ||
     asksAboutMillionPlusNeverBooked(normalized) ||
     asksAboutTodaysCalls(normalized) ||
@@ -183,20 +184,7 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
   }
 
   if (dateRange && asksAboutCallsInDateRange(normalized)) {
-    const rangeCalls = callsScheduledBetween(deals, dateRange.startDate, dateRange.endDate);
-    const noShowCalls = rangeCalls.filter(isNoShowDeal);
-    const rate = rangeCalls.length ? noShowCalls.length / rangeCalls.length : 0;
-    const lines = [
-      `From ${friendlyDate(dateRange.startDate)} to ${friendlyDate(dateRange.endDate)}, ${rangeCalls.length} calls were scheduled.`,
-    ];
-
-    if (asksAboutNoShowRate(normalized) || /\b(no\s*show|no-show|noshow)\b/.test(normalized)) {
-      lines.push(
-        `${noShowCalls.length} of them were no-shows, so the no-show rate was ${(rate * 100).toFixed(1)}%.`,
-      );
-    }
-
-    return lines.join("\n");
+    return formatDateRangeCallReport(deals, dateRange.startDate, dateRange.endDate, normalized);
   }
 
   if (dateRange && asksAboutFitLeadsCreatedInRange(normalized)) {
@@ -972,6 +960,74 @@ function formatDetailedCallItem(deal: SalesDeal) {
   return lines.join("\n");
 }
 
+function formatDateRangeCallReport(
+  deals: SalesDeal[],
+  startDate: string,
+  endDate: string,
+  normalizedQuestion: string,
+) {
+  const rangeCalls = callsScheduledBetween(salesCrmDeals(deals), startDate, endDate);
+  const noShowCalls = rangeCalls.filter(isNoShowDeal);
+  const cancelledCalls = rangeCalls.filter(isCancelledDeal);
+  const rescheduledCalls = rangeCalls.filter(isRescheduledDeal);
+  const happenedCalls = rangeCalls.filter(isHappenedCall);
+  const fitHappenedCalls = happenedCalls.filter((deal) => deal.qualification === "Fit");
+  const millionPlusHappenedCalls = happenedCalls.filter(isMillionPlusLead);
+  const wantsOutcomes =
+    /\b(outcome|outcomes|what happened|notes?|what'?s next|next steps?|sales qualified|qualified)\b/.test(
+      normalizedQuestion,
+    );
+  const lines = [
+    `From ${friendlyDate(startDate)} to ${friendlyDate(endDate)}:`,
+    `- ${rangeCalls.length} calls were scheduled.`,
+    `- ${happenedCalls.length} likely happened.`,
+    `- ${fitHappenedCalls.length} of the calls that happened were Fit leads.`,
+    `- ${noShowCalls.length} were no-shows.`,
+    `- ${cancelledCalls.length} were cancelled.`,
+    `- ${rescheduledCalls.length} were rescheduled.`,
+    `- ${millionPlusHappenedCalls.length} of the calls that happened were $1M+ leads.`,
+  ];
+
+  if (!wantsOutcomes && !/\b1\s*m\+|1m\+|\$1\s*m|million\b/.test(normalizedQuestion)) {
+    return lines.join("\n");
+  }
+
+  if (!millionPlusHappenedCalls.length) {
+    return [...lines, "", "I do not see any $1M+ calls that happened in that window."].join("\n");
+  }
+
+  return [
+    ...lines,
+    "",
+    "$1M+ call outcomes:",
+    ...millionPlusHappenedCalls
+      .sort((a, b) => dateOnly(a.firstMeetingDate).localeCompare(dateOnly(b.firstMeetingDate)) || a.account.localeCompare(b.account))
+      .map(formatCallOutcomeItem),
+  ].join("\n");
+}
+
+function formatCallOutcomeItem(deal: SalesDeal) {
+  const statusParts = [
+    deal.qualification && deal.qualification !== "5" ? deal.qualification : "",
+    deal.callStage && deal.callStage !== "5" ? deal.callStage : "",
+    deal.nextStepsStatus && deal.nextStepsStatus !== "5" ? deal.nextStepsStatus : "",
+    deal.finalVerdict && deal.finalVerdict !== "5" ? deal.finalVerdict : "",
+  ].filter(Boolean);
+  const note = compactNote(deal.salesCallNotes || deal.agentNotes || deal.nextStep || deal.lookingFor || "");
+  const details = [
+    friendlyDateTime(deal.firstMeetingDate),
+    deal.owner && deal.owner !== "Unassigned" ? `owner ${deal.owner}` : "",
+    deal.country,
+    usableField(deal.website) ? deal.website : "",
+  ].filter(Boolean);
+
+  return [
+    `- ${deal.account}${details.length ? ` (${details.join(", ")})` : ""}`,
+    `  Status: ${statusParts.length ? statusParts.join(" / ") : "no outcome entered"}`,
+    `  Notes: ${note || "none in CRM"}`,
+  ].join("\n");
+}
+
 function usableField(value: string) {
   const normalized = value.trim();
   return Boolean(normalized && normalized !== "5");
@@ -1033,6 +1089,14 @@ function callsScheduledBetween(deals: SalesDeal[], startDate: string, endDate: s
     .sort((a, b) => dateOnly(a.firstMeetingDate).localeCompare(dateOnly(b.firstMeetingDate)));
 }
 
+function salesCrmDeals(deals: SalesDeal[]) {
+  return deals.filter((deal) => !isCmoDinnerDeal(deal));
+}
+
+function isHappenedCall(deal: SalesDeal) {
+  return !isNoShowDeal(deal) && !isCancelledDeal(deal) && !isRescheduledDeal(deal);
+}
+
 function leadAddedDate(deal: SalesDeal) {
   return dateOnly(deal.dateAdded) || dateOnly(deal.createdAt);
 }
@@ -1048,6 +1112,18 @@ function asksAboutFitLeadsCreatedInRange(normalized: string) {
 function isNoShowDeal(deal: SalesDeal) {
   return [deal.callStage, deal.nextStepsStatus, deal.finalVerdict].some(
     (value) => value === "No Show",
+  );
+}
+
+function isCancelledDeal(deal: SalesDeal) {
+  return [deal.callStage, deal.nextStepsStatus, deal.finalVerdict].some(
+    (value) => value === "Cancelled",
+  );
+}
+
+function isRescheduledDeal(deal: SalesDeal) {
+  return [deal.callStage, deal.nextStepsStatus, deal.finalVerdict].some(
+    (value) => value === "Reschedule" || value === "Rescheduled",
   );
 }
 
