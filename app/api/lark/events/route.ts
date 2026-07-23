@@ -573,7 +573,7 @@ function findDealMatches({
 
   if (!tokens.length) return [];
 
-  return deals
+  const ranked = deals
     .map((deal) => {
       const directScore = relevanceScore(deal, tokens);
       const contextBonus = directScore > 0 ? relevanceScore(deal, contextTokens) * 0.25 : 0;
@@ -586,8 +586,26 @@ function findDealMatches({
       };
     })
     .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map((item) => item.deal);
+    .sort((a, b) => b.score - a.score);
+
+  const confidentMatch = confidentSingleMatch(ranked);
+  if (confidentMatch) return [confidentMatch.deal];
+
+  return ranked.map((item) => item.deal);
+}
+
+function confidentSingleMatch(ranked: Array<{ deal: SalesDeal; score: number }>) {
+  const [top, second] = ranked;
+
+  if (!top) return null;
+  if (!second) return top.score >= 80 ? top : null;
+
+  const scoreGap = top.score - second.score;
+
+  if (top.score >= 180 && scoreGap >= 80) return top;
+  if (top.score >= 280 && scoreGap >= 40 && isCmoDinnerDeal(top.deal)) return top;
+
+  return null;
 }
 
 function relevanceScore(deal: SalesDeal, tokens: string[]) {
