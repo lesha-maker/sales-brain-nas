@@ -11,6 +11,7 @@ import {
   appendConversationMemory,
   appendSalesContextNote,
   clearPendingMondayAction,
+  crawlSalesMemory,
   getConversationMemory,
   getConfiguredSalesBoardIds,
   getLatestSalesMemory,
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest) {
   const question = parseTextContent(message.content);
   const threadId = conversationThreadId(message);
   const conversation = await getConversationMemory(threadId);
-  const boardData = await loadSalesBoardDeals();
+  const boardData = await loadSalesBoardDeals(question);
   const contextNotes = await getSalesContextNotes();
   const answer =
     (await maybeHandleMondayWrite({
@@ -299,7 +300,7 @@ function truncateForMonitor(text: string) {
   return normalized.length > 1200 ? `${normalized.slice(0, 1197)}...` : normalized;
 }
 
-async function loadSalesBoardDeals() {
+async function loadSalesBoardDeals(question = "") {
   const boardIds = getConfiguredSalesBoardIds();
 
   if (!boardIds.length) {
@@ -307,6 +308,14 @@ async function loadSalesBoardDeals() {
   }
 
   const memory = await getLatestSalesMemory();
+  const shouldRefresh = shouldUseFreshSalesData(question) && isStaleSalesMemory(memory?.generatedAt);
+
+  if (shouldRefresh) {
+    const freshMemory = await crawlSalesMemory(boardIds);
+    if (freshMemory?.deals.length) {
+      return { boardId: boardIds[0], deals: freshMemory.deals };
+    }
+  }
 
   if (memory?.deals.length && memory.deals.some((deal) => deal.group)) {
     return { boardId: boardIds[0], deals: memory.deals };
@@ -317,6 +326,26 @@ async function loadSalesBoardDeals() {
     boardId: boardIds[0],
     deals: snapshots.flatMap((snapshot) => snapshot.deals),
   };
+}
+
+function shouldUseFreshSalesData(question: string) {
+  const normalized = question.toLowerCase();
+  return (
+    /\b(how many|count|rate|number|total)\b/.test(normalized) ||
+    /\b(call|calls|meeting|meetings|no\s*show|cancelled|canceled|rescheduled|1m|1\s*m|\$1m)\b/.test(
+      normalized,
+    ) ||
+    /\b(from|since|between|today|yesterday|this week|last week)\b/.test(normalized)
+  );
+}
+
+function isStaleSalesMemory(generatedAt?: string) {
+  if (!generatedAt) return true;
+
+  const generatedTime = Date.parse(generatedAt);
+  if (Number.isNaN(generatedTime)) return true;
+
+  return Date.now() - generatedTime > 2 * 60 * 1000;
 }
 
 async function maybeHandleMondayWrite({
