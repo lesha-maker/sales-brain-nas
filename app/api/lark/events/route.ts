@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
   const message = payload.event?.message;
   const messageId = message?.message_id;
 
-  if (!messageId || message?.message_type !== "text") {
+  if (!messageId || !isSupportedMessageType(message?.message_type)) {
     return NextResponse.json({ ok: true, ignored: "non-text-message" });
   }
 
@@ -170,11 +170,37 @@ function parseTextContent(content?: string) {
   if (!content) return "";
 
   try {
-    const parsed = JSON.parse(content) as { text?: string };
-    return removeBotMentions(parsed.text ?? "");
+    const parsed = JSON.parse(content) as unknown;
+    return removeBotMentions(extractTextFromLarkContent(parsed));
   } catch {
     return removeBotMentions(content);
   }
+}
+
+function isSupportedMessageType(messageType?: string) {
+  return messageType === "text" || messageType === "post";
+}
+
+function extractTextFromLarkContent(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+
+  if (Array.isArray(value)) {
+    return value.map(extractTextFromLarkContent).filter(Boolean).join(" ");
+  }
+
+  if (typeof value !== "object") return "";
+
+  const record = value as Record<string, unknown>;
+
+  if (typeof record.text === "string") return record.text;
+  if (typeof record.user_name === "string") return `@${record.user_name}`;
+  if (typeof record.name === "string") return `@${record.name}`;
+  if (typeof record.title === "string" && record.content) {
+    return [record.title, extractTextFromLarkContent(record.content)].filter(Boolean).join(" ");
+  }
+
+  return extractTextFromLarkContent(record.content);
 }
 
 function shouldAnswerLarkMessage(message: NonNullable<LarkEventPayload["event"]>["message"]) {
