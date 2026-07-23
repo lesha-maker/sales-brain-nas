@@ -19,6 +19,7 @@ import {
   registerLarkMessageDelivery,
   setPendingMondayAction,
   type ConversationMessage,
+  type PendingMondayAction,
 } from "../../../lib/sales-memory";
 
 type LarkEventPayload = {
@@ -306,31 +307,15 @@ async function maybeHandleMondayWrite({
   conversation: ConversationMessage[];
 }) {
   if (isConfirmation(question)) {
-    const action = await getPendingMondayAction(threadId);
+    const action =
+      (await getPendingMondayAction(threadId)) ||
+      recoverPendingMondayAction({ conversation, boardId, deals });
 
     if (!action) {
       return "";
     }
 
-    if (action.columnValues && Object.keys(action.columnValues).length) {
-      await changeDealColumns({
-        boardId: action.boardId,
-        itemId: action.itemId,
-        columnValues: action.columnValues,
-      });
-    }
-
-    await createDealUpdate({
-      itemId: action.itemId,
-      body:
-        action.updateBody ||
-        `Sales Brain updated ${action.description} after explicit Lark approval.`,
-    });
-
-    await clearPendingMondayAction(threadId);
-
-    const email = action.email ? ` (${action.email})` : "";
-    return `Done - I updated ${action.account}${email} in monday: ${action.description}.`;
+    return executePendingMondayAction({ threadId, action });
   }
 
   const updateIntent = mondayUpdateIntent(question, conversation);
@@ -371,6 +356,76 @@ async function maybeHandleMondayWrite({
   const stageText = currentStage ? ` It is currently at ${currentStage}.` : "";
 
   return `I found ${formatSelectedDeal(deal)}.${stageText} Reply yes to confirm, and I'll ${updateIntent.confirmationText}.`;
+}
+
+async function executePendingMondayAction({
+  threadId,
+  action,
+}: {
+  threadId: string;
+  action: PendingMondayAction;
+}) {
+  if (action.columnValues && Object.keys(action.columnValues).length) {
+    await changeDealColumns({
+      boardId: action.boardId,
+      itemId: action.itemId,
+      columnValues: action.columnValues,
+    });
+  }
+
+  await createDealUpdate({
+    itemId: action.itemId,
+    body:
+      action.updateBody ||
+      `Sales Brain updated ${action.description} after explicit Lark approval.`,
+  });
+
+  await clearPendingMondayAction(threadId);
+
+  const email = action.email ? ` (${action.email})` : "";
+  return `Done - I updated ${action.account}${email} in monday: ${action.description}.`;
+}
+
+function recoverPendingMondayAction({
+  conversation,
+  boardId,
+  deals,
+}: {
+  conversation: ConversationMessage[];
+  boardId: string;
+  deals: SalesDeal[];
+}) {
+  const latestUpdateRequest = [...conversation]
+    .reverse()
+    .filter((message) => message.role === "user")
+    .map((message) => message.text)
+    .find((message) => mondayUpdateIntent(message, []));
+
+  if (!latestUpdateRequest) return null;
+
+  const updateIntent = mondayUpdateIntent(latestUpdateRequest, []);
+  if (!updateIntent) return null;
+
+  const matches = findDealMatches({
+    question: latestUpdateRequest,
+    conversation,
+    deals,
+  }).slice(0, 2);
+
+  if (matches.length !== 1) return null;
+
+  const deal = matches[0];
+
+  return {
+    id: `${Date.now()}-${deal.id}`,
+    createdAt: new Date().toISOString(),
+    boardId: deal.boardId || boardId,
+    itemId: deal.id,
+    account: deal.account,
+    email: deal.email,
+    description: updateIntent.description,
+    columnValues: columnValuesForUpdateIntent(updateIntent, deal),
+  } satisfies PendingMondayAction;
 }
 
 async function maybeHandleSalesMemoryCapture({
