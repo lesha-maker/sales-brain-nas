@@ -40,7 +40,11 @@ export async function answerSalesQuestion({
     return cmoDinnerAnswer;
   }
 
-  if (asksAboutMillionPlusNeverBooked(normalized) || asksAboutTodaysCalls(normalized)) {
+  if (
+    asksAboutMillionPlusNeverBooked(normalized) ||
+    asksAboutTodaysCalls(normalized) ||
+    asksAboutNoShowRate(normalized)
+  ) {
     return fallback;
   }
 
@@ -114,6 +118,7 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
   const outboundSalesQualified = salesQualified.filter(isOutbound);
   const upcomingCalls = upcomingBookedMeetings(deals);
   const todaysCalls = bookedMeetingsOn(deals, todayInSingapore());
+  const noShowRate = noShowRateForLastSevenDays(deals);
 
   if (normalized.includes("stuck") || normalized.includes("risk")) {
     return [
@@ -173,6 +178,29 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
       : `I found ${matches.length} calls today:`;
 
     return [heading, ...matches.map(formatDetailedCallItem)].join("\n");
+  }
+
+  if (asksAboutNoShowRate(normalized)) {
+    const lines = [
+      `In the last 7 days (${friendlyDate(noShowRate.startDate)} to ${friendlyDate(noShowRate.endDate)}), we had ${noShowRate.scheduledCount} calls scheduled and ${noShowRate.noShowCount} no-shows.`,
+      `That makes the no-show rate ${noShowRate.rateLabel}.`,
+    ];
+
+    if (asksAboutUpcomingCalls(normalized)) {
+      lines.push(
+        `We also have ${upcomingCalls.length} upcoming calls booked from today onward.`,
+      );
+    }
+
+    if (/\b(list|which|who|names?)\b/.test(normalized) && noShowRate.noShowDeals.length) {
+      lines.push(
+        ...noShowRate.noShowDeals
+          .slice(0, 15)
+          .map((deal) => `- ${deal.account}: ${friendlyDate(deal.firstMeetingDate)}, owner ${deal.owner}`),
+      );
+    }
+
+    return lines.join("\n");
   }
 
   if (asksAboutUpcomingCalls(normalized)) {
@@ -382,6 +410,7 @@ function buildCrmSummary(
     20,
   );
   const upcomingCalls = topDeals(upcomingBookedMeetings(deals), 20);
+  const noShowRate = noShowRateForLastSevenDays(deals);
   const lateStageClosing = topDeals(
     deals.filter((deal) =>
       ["2nd call with Nuseir", "Confirmed (Verbal)", "Completed"].includes(deal.finalVerdict),
@@ -435,6 +464,16 @@ function buildCrmSummary(
     upcomingCalls,
     upcomingCallsDefinition:
       "callStage is Booked a Meeting and firstMeetingDate is today or later in Asia/Singapore",
+    noShowRateLast7Days: {
+      startDate: noShowRate.startDate,
+      endDate: noShowRate.endDate,
+      scheduledCount: noShowRate.scheduledCount,
+      noShowCount: noShowRate.noShowCount,
+      rate: noShowRate.rateLabel,
+      definition:
+        "scheduledCount is records with firstMeetingDate in the last 7 calendar days including today; noShowCount is those records where callStage, nextStepsStatus, or finalVerdict is No Show.",
+      noShowDeals: noShowRate.noShowDeals.slice(0, 20).map(toCrmDealSummary),
+    },
     lateStageClosing,
     proposalDone,
     relevantDeals,
@@ -621,6 +660,15 @@ function asksAboutTodaysCalls(normalizedQuestion: string) {
   return (
     /\btoday\b/.test(normalizedQuestion) &&
     /\b(call|calls|meeting|meetings)\b/.test(normalizedQuestion)
+  );
+}
+
+function asksAboutNoShowRate(normalizedQuestion: string) {
+  return (
+    /\b(no\s*show|no-show|noshow)\b/.test(normalizedQuestion) &&
+    /\b(rate|percentage|percent|how many|count|last week|last 7 days|past week)\b/.test(
+      normalizedQuestion,
+    )
   );
 }
 
@@ -865,6 +913,47 @@ function bookedMeetingsOn(deals: SalesDeal[], targetDate: string) {
     .filter((deal) => deal.callStage === "Booked a Meeting")
     .filter((deal) => dateOnly(deal.firstMeetingDate) === targetDate)
     .sort((a, b) => timeOnly(a.firstMeetingDate).localeCompare(timeOnly(b.firstMeetingDate)));
+}
+
+function noShowRateForLastSevenDays(deals: SalesDeal[]) {
+  const endDate = todayInSingapore();
+  const startDate = daysAgoInSingapore(6);
+  const scheduledDeals = deals.filter((deal) => {
+    const meetingDate = dateOnly(deal.firstMeetingDate);
+    return meetingDate ? meetingDate >= startDate && meetingDate <= endDate : false;
+  });
+  const noShowDeals = scheduledDeals.filter(isNoShowDeal);
+  const rate = scheduledDeals.length ? noShowDeals.length / scheduledDeals.length : 0;
+
+  return {
+    startDate,
+    endDate,
+    scheduledCount: scheduledDeals.length,
+    noShowCount: noShowDeals.length,
+    rate,
+    rateLabel: `${(rate * 100).toFixed(1)}%`,
+    noShowDeals: noShowDeals.sort((a, b) =>
+      dateOnly(a.firstMeetingDate).localeCompare(dateOnly(b.firstMeetingDate)),
+    ),
+  };
+}
+
+function isNoShowDeal(deal: SalesDeal) {
+  return [deal.callStage, deal.nextStepsStatus, deal.finalVerdict].some(
+    (value) => value === "No Show",
+  );
+}
+
+function daysAgoInSingapore(days: number) {
+  const date = new Date(`${todayInSingapore()}T00:00:00+08:00`);
+  date.setUTCDate(date.getUTCDate() - days);
+
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Singapore",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 function todayInSingapore() {
