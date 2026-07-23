@@ -177,7 +177,7 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
       ? `I found ${matches.length} calls today assigned to ${ownerFilter.label}:`
       : `I found ${matches.length} calls today:`;
 
-    return [heading, ...matches.map(formatDetailedCallItem)].join("\n");
+    return [heading, ...matches.map(formatDetailedCallItem)].join("\n\n");
   }
 
   if (asksAboutNoShowRate(normalized)) {
@@ -204,6 +204,26 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
   }
 
   if (asksAboutUpcomingCalls(normalized)) {
+    const ownerFilter = requestedOwner(normalized);
+    const wantsDetails = asksForCallDetails(normalized);
+    const matches = ownerFilter
+      ? upcomingCalls.filter((deal) => ownerMatches(deal, ownerFilter))
+      : upcomingCalls;
+
+    if (ownerFilter || wantsDetails) {
+      if (!matches.length) {
+        return ownerFilter
+          ? `I do not see any upcoming calls assigned to ${ownerFilter.label}.`
+          : "I do not see any upcoming calls booked from today onward.";
+      }
+
+      const heading = ownerFilter
+        ? `Next calls for ${ownerFilter.label}:`
+        : `Next ${Math.min(matches.length, 12)} upcoming calls:`;
+
+      return [heading, ...matches.slice(0, 12).map(formatDetailedCallItem)].join("\n\n");
+    }
+
     return `You have ${upcomingCalls.length} upcoming calls. I counted records where call stage is Booked a Meeting and the 1st meeting date is today or later.`;
   }
 
@@ -325,6 +345,7 @@ async function askOpenAI({
                 "Say 'sales qualified' instead of 'Call Stage = Sales Qualified' unless the exact field name matters.",
                 "When the user asks how many calls are coming up, upcoming calls, or booked calls, count only CRM records where callStage is 'Booked a Meeting' and firstMeetingDate is today or later in Asia/Singapore.",
                 "When giving details about specific calls or meetings, always include the company website when it is present in the CRM and label times as SGT.",
+                "When listing calls, use a clean block per company: Company, Time, Website, Budget, Agent notes. Put Agent notes from the monday Agent notes column first if it exists.",
                 "When the user mentions CMO dinner, dinner leads, Miami dinner, Singapore dinner, or Tel Aviv, use only the CMO Dinner board records. In this CRM summary those are in crmSummary.cmoDinner.",
                 "Use the recent conversation to understand follow-up questions. For example, if the user asks for 'the list', infer the list from the previous answer.",
                 "If the follow-up is ambiguous, make your best inference from the recent conversation and say what you assumed.",
@@ -663,6 +684,15 @@ function asksAboutTodaysCalls(normalizedQuestion: string) {
   );
 }
 
+function asksForCallDetails(normalizedQuestion: string) {
+  return (
+    /\b(info|details|detail|list|which|who|what|notes?|agent notes?|company|companies|website|websites?)\b/.test(
+      normalizedQuestion,
+    ) &&
+    /\b(call|calls|meeting|meetings)\b/.test(normalizedQuestion)
+  );
+}
+
 function asksAboutNoShowRate(normalizedQuestion: string) {
   return (
     /\b(no\s*show|no-show|noshow)\b/.test(normalizedQuestion) &&
@@ -873,17 +903,21 @@ function formatLeadListItem(deal: SalesDeal) {
 }
 
 function formatDetailedCallItem(deal: SalesDeal) {
-  const qualifierNotes = compactNote(
-    deal.agentNotes || deal.salesCallNotes || deal.lookingFor || deal.nextStep || "",
-  );
-  const details = [
-    deal.firstMeetingDate ? `time ${friendlyDateTime(deal.firstMeetingDate)}` : "",
-    usableField(deal.website) ? `website ${deal.website}` : "website not in CRM",
-    deal.budget && deal.budget !== "Unknown" ? `budget ${deal.budget}` : "budget unknown",
-    qualifierNotes ? `qualifier notes: ${qualifierNotes}` : "qualifier notes: none in CRM",
-  ];
+  const agentNotes = compactNote(deal.agentNotes || "");
+  const fallbackNotes = compactNote(deal.salesCallNotes || deal.lookingFor || deal.nextStep || "");
+  const lines = [
+    `Company: ${deal.account}`,
+    deal.firstMeetingDate ? `Time: ${friendlyDateTime(deal.firstMeetingDate)} SGT` : "",
+    usableField(deal.website) ? `Website: ${deal.website}` : "Website: not in CRM",
+    deal.budget && deal.budget !== "Unknown" ? `Budget: ${deal.budget}` : "Budget: unknown",
+    agentNotes
+      ? `Agent notes: ${agentNotes}`
+      : fallbackNotes
+        ? `Agent notes: ${fallbackNotes}`
+        : "Agent notes: none in CRM",
+  ].filter(Boolean);
 
-  return `- ${deal.account}: ${details.join("; ")}`;
+  return lines.join("\n");
 }
 
 function usableField(value: string) {
