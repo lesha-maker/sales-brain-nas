@@ -308,16 +308,9 @@ async function loadSalesBoardDeals(question = "") {
   }
 
   const memory = await getLatestSalesMemory();
-  const shouldRefresh = shouldUseFreshSalesData(question) && isStaleSalesMemory(memory?.generatedAt);
-
-  if (shouldRefresh) {
-    const freshMemory = await crawlSalesMemory(boardIds);
-    if (freshMemory?.deals.length) {
-      return { boardId: boardIds[0], deals: freshMemory.deals };
-    }
-  }
 
   if (memory?.deals.length && memory.deals.some((deal) => deal.group)) {
+    refreshSalesMemoryInBackground({ question, generatedAt: memory.generatedAt, boardIds });
     return { boardId: boardIds[0], deals: memory.deals };
   }
 
@@ -326,6 +319,22 @@ async function loadSalesBoardDeals(question = "") {
     boardId: boardIds[0],
     deals: snapshots.flatMap((snapshot) => snapshot.deals),
   };
+}
+
+function refreshSalesMemoryInBackground({
+  question,
+  generatedAt,
+  boardIds,
+}: {
+  question: string;
+  generatedAt?: string;
+  boardIds: string[];
+}) {
+  if (!shouldUseFreshSalesData(question) || !isStaleSalesMemory(generatedAt)) return;
+
+  void crawlSalesMemory(boardIds).catch((error) => {
+    console.error("Unable to refresh Sales Brain memory in the background", error);
+  });
 }
 
 function shouldUseFreshSalesData(question: string) {
