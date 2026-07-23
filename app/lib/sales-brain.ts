@@ -40,7 +40,7 @@ export async function answerSalesQuestion({
     return cmoDinnerAnswer;
   }
 
-  if (asksAboutMillionPlusNeverBooked(normalized)) {
+  if (asksAboutMillionPlusNeverBooked(normalized) || asksAboutTodaysCallsWithDetails(normalized)) {
     return fallback;
   }
 
@@ -113,6 +113,7 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
   const inboundSalesQualified = salesQualified.filter((deal) => !isOutbound(deal));
   const outboundSalesQualified = salesQualified.filter(isOutbound);
   const upcomingCalls = upcomingBookedMeetings(deals);
+  const todaysCalls = bookedMeetingsOn(deals, todayInSingapore());
 
   if (normalized.includes("stuck") || normalized.includes("risk")) {
     return [
@@ -153,6 +154,25 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
     ]
       .filter(Boolean)
       .join("\n");
+  }
+
+  if (asksAboutTodaysCallsWithDetails(normalized)) {
+    const ownerFilter = requestedOwner(normalized);
+    const matches = ownerFilter
+      ? todaysCalls.filter((deal) => ownerMatches(deal, ownerFilter))
+      : todaysCalls;
+
+    if (!matches.length) {
+      return ownerFilter
+        ? `I do not see any calls today assigned to ${ownerFilter.label}.`
+        : "I do not see any calls scheduled for today.";
+    }
+
+    const heading = ownerFilter
+      ? `I found ${matches.length} calls today assigned to ${ownerFilter.label}:`
+      : `I found ${matches.length} calls today:`;
+
+    return [heading, ...matches.map(formatDetailedCallItem)].join("\n");
   }
 
   if (asksAboutUpcomingCalls(normalized)) {
@@ -576,6 +596,14 @@ function asksAboutUpcomingCalls(normalizedQuestion: string) {
   return mentionsCall && mentionsUpcoming;
 }
 
+function asksAboutTodaysCallsWithDetails(normalizedQuestion: string) {
+  return (
+    /\btoday\b/.test(normalizedQuestion) &&
+    /\b(call|calls|meeting|meetings)\b/.test(normalizedQuestion) &&
+    /\b(company|budget|qualifier|agent|says|notes|info|assigned)\b/.test(normalizedQuestion)
+  );
+}
+
 function asksAboutMillionPlusNeverBooked(normalizedQuestion: string) {
   const mentionsMillionPlus =
     /\b1\s*m\+?\b/.test(normalizedQuestion) ||
@@ -699,6 +727,31 @@ function isOutbound(deal: SalesDeal) {
   return deal.source?.toLowerCase().includes("outbound") || false;
 }
 
+function requestedOwner(normalizedQuestion: string) {
+  if (/\b(diko|ildiko)\b/.test(normalizedQuestion)) {
+    return { label: "Diko", tokens: ["diko", "ildiko", "kissimonova"] };
+  }
+
+  if (/\b(diana)\b/.test(normalizedQuestion)) {
+    return { label: "Diana", tokens: ["diana", "orozco", "gollaz"] };
+  }
+
+  if (/\b(alex)\b/.test(normalizedQuestion)) {
+    return { label: "Alex", tokens: ["alex", "dwek"] };
+  }
+
+  if (/\b(lesha)\b/.test(normalizedQuestion)) {
+    return { label: "Lesha", tokens: ["lesha", "mansukhani"] };
+  }
+
+  return null;
+}
+
+function ownerMatches(deal: SalesDeal, owner: { tokens: string[] }) {
+  const normalizedOwner = deal.owner.toLowerCase();
+  return owner.tokens.some((token) => normalizedOwner.includes(token));
+}
+
 function isMillionPlusLead(deal: SalesDeal) {
   if (deal.value >= 1_000_000) return true;
 
@@ -726,6 +779,24 @@ function formatLeadListItem(deal: SalesDeal) {
   return `- ${deal.account}${details.length ? `: ${details.join(", ")}` : ""}`;
 }
 
+function formatDetailedCallItem(deal: SalesDeal) {
+  const qualifierNotes = compactNote(
+    deal.agentNotes || deal.salesCallNotes || deal.lookingFor || deal.nextStep || "",
+  );
+  const details = [
+    deal.firstMeetingDate ? `time ${friendlyDateTime(deal.firstMeetingDate)}` : "",
+    deal.budget && deal.budget !== "Unknown" ? `budget ${deal.budget}` : "budget unknown",
+    qualifierNotes ? `qualifier notes: ${qualifierNotes}` : "qualifier notes: none in CRM",
+  ];
+
+  return `- ${deal.account}: ${details.join("; ")}`;
+}
+
+function compactNote(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized && normalized !== "5" ? normalized.slice(0, 260) : "";
+}
+
 function upcomingBookedMeetings(deals: SalesDeal[]) {
   const today = todayInSingapore();
 
@@ -736,6 +807,13 @@ function upcomingBookedMeetings(deals: SalesDeal[]) {
       return meetingDate ? meetingDate >= today : false;
     })
     .sort((a, b) => dateOnly(a.firstMeetingDate).localeCompare(dateOnly(b.firstMeetingDate)));
+}
+
+function bookedMeetingsOn(deals: SalesDeal[], targetDate: string) {
+  return deals
+    .filter((deal) => deal.callStage === "Booked a Meeting")
+    .filter((deal) => dateOnly(deal.firstMeetingDate) === targetDate)
+    .sort((a, b) => timeOnly(a.firstMeetingDate).localeCompare(timeOnly(b.firstMeetingDate)));
 }
 
 function todayInSingapore() {
@@ -784,6 +862,27 @@ function friendlyDate(value: string) {
     month: "short",
     day: "numeric",
   }).format(parsed);
+}
+
+function friendlyDateTime(value: string) {
+  const time = timeOnly(value);
+  return time || friendlyDate(value);
+}
+
+function timeOnly(value: string) {
+  const parsed = Date.parse(value);
+
+  if (!Number.isNaN(parsed)) {
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Singapore",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(parsed);
+  }
+
+  const match = value.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : "";
 }
 
 function monthNumber(value: string) {
