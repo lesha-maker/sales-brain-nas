@@ -38,7 +38,7 @@ export function buildCeoSalesReport({
 
   const snapshotRows = pipelineSnapshotRows(pipeline);
   const agreementRows = progressTableRows("Agreement Stage", pipeline.agreement.slice(0, 5));
-  const hotRows = progressTableRows("Hot Opportunities", pipeline.hot.slice(0, 10));
+  const hotRows = progressTableRows("Hot Opportunities", pipeline.hot.slice(0, 8));
   const newEnterpriseRows = tableRows(
     ["Lead", "Signal", "Owner"],
     pipeline.newEnterprise.slice(0, 8).map((deal) => [
@@ -186,7 +186,7 @@ function cmoDinnerTableRows(dinnerMarkets: Array<[string, SalesDeal[]]>) {
       cleanName(deal.account),
       [cleanOwner(deal.owner), dinnerAction(deal).replace(/^ — /, "")].filter(Boolean).join(" / "),
     ]),
-  );
+  ).slice(0, 8);
 
   return tableRows(["Market", "Lead", "Owner / Status"], rows);
 }
