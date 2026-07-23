@@ -4,6 +4,8 @@ export type SalesDeal = {
   id: string;
   boardId?: string;
   boardName?: string;
+  createdAt: string;
+  dateAdded: string;
   account: string;
   group?: string;
   owner: string;
@@ -115,6 +117,7 @@ export async function getBoardSnapshot(boardId: string) {
             items {
               id
               name
+              created_at
               group { id title }
               column_values(capabilities: [CALCULATED]) {
                 id
@@ -177,6 +180,7 @@ async function getNextItemsPage(cursor: string) {
           items {
             id
             name
+            created_at
             group { id title }
               column_values(capabilities: [CALCULATED]) {
                 id
@@ -218,6 +222,7 @@ function mergeColumns(
 type MondayItem = {
   id: string;
   name: string;
+  created_at?: string;
   group?: { id: string; title: string };
   column_values: Array<{
     id: string;
@@ -286,7 +291,15 @@ function normalizeDeals(board: {
 
       if (column.value) {
         try {
-          const parsed = JSON.parse(column.value) as { index?: string | number };
+          const parsed = JSON.parse(column.value) as {
+            date?: string;
+            index?: string | number;
+            text?: string;
+            url?: string;
+          };
+          if (parsed.date) return parsed.date;
+          if (parsed.text) return parsed.text;
+          if (parsed.url) return parsed.url;
           if (parsed.index !== undefined) return labels[String(parsed.index)] || "";
         } catch {}
       }
@@ -325,6 +338,10 @@ function normalizeDeals(board: {
       firstPresent([valueFor(columns.latestMeeting), valueForTitle("Latest Meeting Date")]) || "";
     const lastFollowUpDate =
       firstPresent([valueFor(columns.lastFollowUpDate), valueForTitle("Last follow up")]) || "";
+    const dateAdded =
+      firstPresent([valueFor(columns.added), valueForTitle("Date Added")]) ||
+      item.created_at?.slice(0, 10) ||
+      "";
     const owner =
       firstPresent([valueFor(columns.owner), valueForTitle("Assigned To", "Owner")]) || "Unassigned";
     const firstName = firstPresent([valueFor(columns.firstName), valueForTitle("First Name")]) || "";
@@ -356,7 +373,7 @@ function normalizeDeals(board: {
         lastFollowUpDate,
         latestMeetingDate,
         firstMeetingDate,
-        valueFor(columns.added),
+        dateAdded,
       ]) || "";
 
     const budget = firstPresent([valueFor(columns.budget), valueForTitle("Budget")]) || "";
@@ -376,6 +393,8 @@ function normalizeDeals(board: {
       id: item.id,
       boardId: board.id,
       boardName: board.name,
+      createdAt: item.created_at || "",
+      dateAdded,
       account: item.name,
       group: item.group?.title || "Unknown",
       owner,
@@ -393,7 +412,7 @@ function normalizeDeals(board: {
         firstPresent([
           latestMeetingDate,
           firstMeetingDate,
-          valueFor(columns.added),
+          dateAdded,
         ]) || "No date",
       health: healthFor({
         finalVerdict: finalVerdict || inferredVerdict,

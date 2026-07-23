@@ -41,6 +41,7 @@ export async function answerSalesQuestion({
   }
 
   if (
+    asksAboutFitLeadsCreatedInRange(normalized) ||
     asksAboutMillionPlusNeverBooked(normalized) ||
     asksAboutTodaysCalls(normalized) ||
     asksAboutNoShowRate(normalized)
@@ -196,6 +197,32 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
     }
 
     return lines.join("\n");
+  }
+
+  if (dateRange && asksAboutFitLeadsCreatedInRange(normalized)) {
+    const matches = deals
+      .filter((deal) => deal.qualification === "Fit")
+      .filter((deal) => {
+        const addedDate = leadAddedDate(deal);
+        return addedDate ? addedDate >= dateRange.startDate && addedDate <= dateRange.endDate : false;
+      })
+      .sort((a, b) => leadAddedDate(a).localeCompare(leadAddedDate(b)) || a.account.localeCompare(b.account));
+
+    if (!matches.length) {
+      return `I do not see any Fit leads added from ${friendlyDate(dateRange.startDate)} to ${friendlyDate(dateRange.endDate)}.`;
+    }
+
+    const visible = matches.slice(0, 30);
+    return [
+      `${matches.length} Fit leads came in from ${friendlyDate(dateRange.startDate)} to ${friendlyDate(dateRange.endDate)}:`,
+      ...visible.map(
+        (deal) =>
+          `- ${deal.account}: ${friendlyDate(leadAddedDate(deal))}, ${deal.group || "unknown group"}${deal.country ? `, ${deal.country}` : ""}`,
+      ),
+      matches.length > visible.length ? `And ${matches.length - visible.length} more.` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   if (asksAboutNoShowRate(normalized)) {
@@ -1006,6 +1033,18 @@ function callsScheduledBetween(deals: SalesDeal[], startDate: string, endDate: s
     .sort((a, b) => dateOnly(a.firstMeetingDate).localeCompare(dateOnly(b.firstMeetingDate)));
 }
 
+function leadAddedDate(deal: SalesDeal) {
+  return dateOnly(deal.dateAdded) || dateOnly(deal.createdAt);
+}
+
+function asksAboutFitLeadsCreatedInRange(normalized: string) {
+  return (
+    /\b(fit|classified as fit|qualification)\b/.test(normalized) &&
+    /\b(came in|come in|came|added|new leads?|leads came|leads added)\b/.test(normalized) &&
+    /\b(from|since|between|after|on)\b/.test(normalized)
+  );
+}
+
 function isNoShowDeal(deal: SalesDeal) {
   return [deal.callStage, deal.nextStepsStatus, deal.finalVerdict].some(
     (value) => value === "No Show",
@@ -1027,7 +1066,7 @@ function requestedDateRange(normalizedQuestion: string) {
   }
 
   const sinceMatch = normalizedQuestion.match(
-    /\bsince\s+(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)\b/,
+    /\b(?:since|from|after)\s+(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)\b/,
   );
 
   if (sinceMatch) {
