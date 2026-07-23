@@ -29,9 +29,14 @@ export async function answerSalesQuestion({
 }: BrainAnswerInput) {
   const fallback = deterministicSalesAnswer(question, deals);
   const directAnswer = directSpecificLeadAnswer({ question, deals, conversation });
+  const cmoDinnerAnswer = directCmoDinnerAnswer(question, deals);
 
   if (directAnswer) {
     return directAnswer;
+  }
+
+  if (cmoDinnerAnswer) {
+    return cmoDinnerAnswer;
   }
 
   if (!process.env.OPENAI_API_KEY) {
@@ -152,6 +157,49 @@ function deterministicSalesAnswer(question: string, deals: SalesDeal[]) {
   ].join("\n");
 }
 
+function directCmoDinnerAnswer(question: string, deals: SalesDeal[]) {
+  const normalized = question.toLowerCase();
+
+  if (!asksAboutCmoDinner(normalized)) return "";
+
+  const dinnerDeals = deals.filter(isCmoDinnerDeal);
+
+  if (!dinnerDeals.length) {
+    return "I checked the CMO Dinner board, but I do not see any CMO dinner records loaded in Sales Brain memory yet.";
+  }
+
+  const hotDeals = dinnerDeals
+    .filter(isHotCmoDinnerLead)
+    .sort((a, b) => cmoDinnerScore(b) - cmoDinnerScore(a))
+    .slice(0, 10);
+
+  if (asksForHotLeads(normalized)) {
+    if (!hotDeals.length) {
+      return `I checked ${dinnerDeals.length} CMO dinner records. None are clearly marked hot yet.`;
+    }
+
+    return [
+      `The hottest CMO dinner leads I see are:`,
+      ...hotDeals.map((deal) => `- ${formatCmoDinnerLead(deal)}`),
+    ].join("\n");
+  }
+
+  if (asksAboutUpcomingCalls(normalized)) {
+    const upcoming = upcomingBookedMeetings(dinnerDeals).slice(0, 10);
+
+    if (!upcoming.length) {
+      return "I checked the CMO Dinner board and do not see upcoming booked meetings dated today or later.";
+    }
+
+    return [
+      `There are ${upcoming.length} upcoming CMO dinner meetings I see:`,
+      ...upcoming.map((deal) => `- ${formatCmoDinnerLead(deal)}`),
+    ].join("\n");
+  }
+
+  return `I checked the CMO Dinner board. It has ${dinnerDeals.length} records loaded, including ${hotDeals.length} hot or high-signal leads.`;
+}
+
 async function askOpenAI({
   question,
   deals,
@@ -186,6 +234,7 @@ async function askOpenAI({
                 "Do not use markdown formatting, bold text, code ticks, bullet points, or CRM jargon unless the user asks for a detailed report.",
                 "Say 'sales qualified' instead of 'Call Stage = Sales Qualified' unless the exact field name matters.",
                 "When the user asks how many calls are coming up, upcoming calls, or booked calls, count only CRM records where callStage is 'Booked a Meeting' and firstMeetingDate is today or later in Asia/Singapore.",
+                "When the user mentions CMO dinner, dinner leads, Miami dinner, Singapore dinner, or Tel Aviv, use only the CMO Dinner board records. In this CRM summary those are in crmSummary.cmoDinner.",
                 "Use the recent conversation to understand follow-up questions. For example, if the user asks for 'the list', infer the list from the previous answer.",
                 "If the follow-up is ambiguous, make your best inference from the recent conversation and say what you assumed.",
                 "When the CRM summary includes relevantDeals, use those records first for questions about a specific company or person.",
@@ -281,6 +330,11 @@ function buildCrmSummary(
     20,
   );
   const relevantDeals = topDeals(findRelevantDeals(deals, question, conversation), 12);
+  const cmoDinnerDeals = deals.filter(isCmoDinnerDeal);
+  const hotCmoDinnerDeals = topDeals(
+    cmoDinnerDeals.filter(isHotCmoDinnerLead).sort((a, b) => cmoDinnerScore(b) - cmoDinnerScore(a)),
+    15,
+  );
   const missingOwnerCount = deals.filter((deal) => deal.owner === "Unassigned").length;
   const noBudgetCount = deals.filter((deal) => deal.budget === "Unknown").length;
   const weightedPipeline = deals.reduce(
@@ -321,6 +375,15 @@ function buildCrmSummary(
     lateStageClosing,
     proposalDone,
     relevantDeals,
+    cmoDinner: {
+      totalRecords: cmoDinnerDeals.length,
+      hotLeads: hotCmoDinnerDeals,
+      upcomingMeetings: topDeals(upcomingBookedMeetings(cmoDinnerDeals), 12),
+      qualifiedCount: cmoDinnerDeals.filter(
+        (deal) => deal.qualification === "Qualified" || deal.qualification === "Fit",
+      ).length,
+      note: "Use this section whenever the user asks about CMO dinner leads.",
+    },
   };
 }
 
@@ -503,6 +566,93 @@ function asksAboutOutboundQualifiedLeads(normalizedQuestion: string) {
   );
 }
 
+function asksAboutCmoDinner(normalizedQuestion: string) {
+  return (
+    /\bcmo\b/.test(normalizedQuestion) ||
+    /\bdinner\b/.test(normalizedQuestion) ||
+    /\bmiami dinner\b/.test(normalizedQuestion) ||
+    /\bsingapore dinner\b/.test(normalizedQuestion) ||
+    /\btel aviv\b/.test(normalizedQuestion)
+  );
+}
+
+function asksForHotLeads(normalizedQuestion: string) {
+  return /\b(hot|hottest|high signal|priority|excited|important|best|top)\b/.test(normalizedQuestion);
+}
+
+function isCmoDinnerDeal(deal: SalesDeal) {
+  return deal.boardId === "5030120019" || (deal.boardName || "").toLowerCase().includes("cmo dinner");
+}
+
+function isHotCmoDinnerLead(deal: SalesDeal) {
+  if (isNegativeDeal(deal)) return false;
+  return cmoDinnerScore(deal) >= 35;
+}
+
+function isNegativeDeal(deal: SalesDeal) {
+  return (
+    ["Lost", "Gone Cold", "No Show", "Not Qualified"].includes(deal.finalVerdict) ||
+    ["No Show", "Not Qualified"].includes(deal.callStage) ||
+    deal.qualification === "Not Qualified"
+  );
+}
+
+function cmoDinnerScore(deal: SalesDeal) {
+  const text = [
+    deal.account,
+    deal.qualification,
+    deal.callStage,
+    deal.nextStepsStatus,
+    deal.finalVerdict,
+    deal.status,
+    deal.followUp,
+    deal.agentNotes,
+    deal.salesCallNotes,
+    deal.budget,
+    deal.jobTitle,
+  ]
+    .join(" ")
+    .toLowerCase();
+  let score = 0;
+
+  if (deal.qualification === "Qualified" || deal.qualification === "Fit") score += 35;
+  if (deal.callStage === "Sales Qualified") score += 35;
+  if (deal.callStage === "Booked a Meeting" || deal.callStage === "Meeting Booked") score += 30;
+  if (deal.nextStepsStatus === "Proposal Done" || deal.nextStepsStatus === "Proposal Stage") score += 25;
+  if (["Agreement Stage", "Confirmed (Verbal)", "2nd call with Nuseir"].includes(deal.finalVerdict)) score += 35;
+  if (deal.status === "Going") score += 8;
+  if (deal.firstMeetingDate) score += 8;
+  if (/\b(proposal|follow[- ]?up|meeting|closing|nuseir|interested|qualified)\b/.test(text)) score += 20;
+  if (/\b(ceo|founder|cmo|head of|vp|director)\b/.test(text)) score += 12;
+  if (/\$1m|1m\+|million|\$ms|300k|500k/i.test(text)) score += 20;
+
+  return score;
+}
+
+function formatCmoDinnerLead(deal: SalesDeal) {
+  const details = [
+    deal.firstMeetingDate ? `meeting ${friendlyDate(deal.firstMeetingDate)}` : "",
+    deal.budget && deal.budget !== "Unknown" ? deal.budget : "",
+    deal.owner && deal.owner !== "Unassigned" ? `owner ${deal.owner}` : "",
+    dinnerSignal(deal),
+  ].filter(Boolean);
+
+  return `${deal.account}${details.length ? `: ${details.join(", ")}` : ""}`;
+}
+
+function dinnerSignal(deal: SalesDeal) {
+  const stages = [deal.callStage, deal.nextStepsStatus, deal.finalVerdict]
+    .filter((value) => value && value !== "5")
+    .join(" / ");
+
+  if (stages) return stages;
+
+  const note = [deal.followUp, deal.agentNotes, deal.salesCallNotes]
+    .find((value) => value && value.trim());
+
+  return note ? note.replace(/\s+/g, " ").slice(0, 120) : "";
+}
+
 function isOutbound(deal: SalesDeal) {
   if (deal.group) return deal.group === "Outbound Leads";
   return deal.source?.toLowerCase().includes("outbound") || false;
@@ -556,6 +706,18 @@ function dateOnly(value: string) {
   return match?.[0] || "";
 }
 
+function friendlyDate(value: string) {
+  const date = dateOnly(value);
+  if (!date) return value;
+
+  const parsed = new Date(`${date}T00:00:00+08:00`);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Singapore",
+    month: "short",
+    day: "numeric",
+  }).format(parsed);
+}
+
 function monthNumber(value: string) {
   const months: Record<string, string> = {
     jan: "01",
@@ -583,6 +745,8 @@ function topDeals(deals: SalesDeal[], limit: number) {
     .map((deal) => ({
       account: deal.account,
       group: deal.group,
+      boardId: deal.boardId,
+      boardName: deal.boardName,
       owner: deal.owner,
       email: deal.email,
       stage: deal.stage,
