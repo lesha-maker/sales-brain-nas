@@ -30,6 +30,15 @@ type LarkEventPayload = {
     token?: string;
   };
   event?: {
+    sender?: {
+      sender_id?: {
+        open_id?: string;
+        union_id?: string;
+        user_id?: string;
+      };
+      sender_type?: string;
+      tenant_key?: string;
+    };
     message?: {
       message_id?: string;
       root_id?: string;
@@ -141,6 +150,15 @@ export async function POST(request: NextRequest) {
     assistantMessage: answer,
   });
 
+  if (isDirectMessage(message)) {
+    await notifyDmMonitor({
+      message,
+      sender: payload.event?.sender,
+      question,
+      answer,
+    });
+  }
+
   return NextResponse.json({ ok: true });
 }
 
@@ -164,6 +182,11 @@ function shouldAnswerLarkMessage(message: NonNullable<LarkEventPayload["event"]>
 function isGroupChat(chatType?: string) {
   const normalized = chatType?.toLowerCase() ?? "";
   return normalized.includes("group") || normalized === "chat";
+}
+
+function isDirectMessage(message: NonNullable<LarkEventPayload["event"]>["message"]) {
+  const normalized = message?.chat_type?.toLowerCase() ?? "";
+  return ["p2p", "private", "direct", "single"].some((type) => normalized.includes(type));
 }
 
 function isBotMentioned(message: NonNullable<LarkEventPayload["event"]>["message"]) {
@@ -199,6 +222,50 @@ function conversationThreadId(message: NonNullable<LarkEventPayload["event"]>["m
     message?.message_id ||
     "lark-default-thread"
   );
+}
+
+async function notifyDmMonitor({
+  message,
+  sender,
+  question,
+  answer,
+}: {
+  message: NonNullable<LarkEventPayload["event"]>["message"];
+  sender?: NonNullable<LarkEventPayload["event"]>["sender"];
+  question: string;
+  answer: string;
+}) {
+  const monitorChatId =
+    process.env.LARK_DM_MONITOR_CHAT_ID ||
+    process.env.LARK_SALES_REPORT_CHAT_ID ||
+    process.env.LARK_SALES_CHAT_ID;
+
+  if (!monitorChatId || monitorChatId === message?.chat_id) return;
+
+  const senderId =
+    sender?.sender_id?.user_id ||
+    sender?.sender_id?.open_id ||
+    sender?.sender_id?.union_id ||
+    "unknown sender";
+
+  try {
+    await sendLarkTextReport({
+      chatId: monitorChatId,
+      text: [
+        "Harry DM monitor",
+        `From: ${senderId}`,
+        `Question: ${truncateForMonitor(question)}`,
+        `Harry: ${truncateForMonitor(answer)}`,
+      ].join("\n"),
+    });
+  } catch (error) {
+    console.error("Unable to send Harry DM monitor notification", error);
+  }
+}
+
+function truncateForMonitor(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length > 1200 ? `${normalized.slice(0, 1197)}...` : normalized;
 }
 
 async function loadSalesBoardDeals() {
