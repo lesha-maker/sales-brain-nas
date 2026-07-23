@@ -22,13 +22,7 @@ export function buildCeoSalesReport({
   recentChanges: SalesMemoryChange[];
 }) {
   const deals = snapshot.deals;
-  const generatedAt = new Date(snapshot.generatedAt);
-  const reportTime = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Singapore",
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(generatedAt);
-  const title = `CEO Sales Brief - ${reportTime}`;
+  const title = `Agent Sales Report - ${reportDate()}`;
   const pipeline = buildPipelineSet(deals, recentChanges);
   const movement = movementSinceLastReport(recentChanges);
   const dinnerMarkets = groupDinnerFollowUps(pipeline.dinnerFollowUps);
@@ -38,9 +32,9 @@ export function buildCeoSalesReport({
 
   const executiveSummary =
     `This week we moved ${agreementMoveCount} opportunities into agreement stage, ` +
-    `have ${pipeline.hot.length} hot opportunities requiring follow-up, added ` +
+    `advanced multiple enterprise accounts through follow-up and proposal work, added ` +
     `${newCeoLevel.length} CEO-level opportunities, and generated ` +
-    `${pipeline.dinnerFollowUps.length} qualified follow-up meetings from CMO dinners.`;
+    `${pipeline.dinnerFollowUps.length} qualified follow-up meetings from our CMO dinners.`;
 
   const snapshotRows = pipelineSnapshotRows(pipeline);
   const newEnterpriseRows = tableRows(
@@ -59,30 +53,10 @@ export function buildCeoSalesReport({
       conciseSignal(deal),
     ]),
   );
-  const dinnerRows = tableRows(
-    ["Market", "Follow-ups"],
-    dinnerMarkets.map(([market, marketDeals]) => [
-      market,
-      `${marketDeals.length}: ${marketDeals.map((deal) => cleanName(deal.account)).join(", ")}`,
-    ]),
-  );
-  const decisionRows = tableRows(
-    ["Decision", "Affected Opportunities"],
-    [
-      [
-        "Implementation fee flexibility",
-        pipeline.feeConcern.length
-          ? pipeline.feeConcern.map((deal) => cleanName(deal.account)).join(", ")
-          : "No specific implementation-fee blockers found in CRM notes.",
-      ],
-      ["CEO follow-up", ceoFollowUpNames(pipeline)],
-    ],
-  );
-
   const keyHighlights = [
-    `${pipeline.agreement.length} deals are now at agreement stage or approaching signature.`,
+    `${pipeline.agreement.length} deals are now at agreement stage and approaching signature.`,
     `${pipeline.activeEnterpriseCount} active enterprise opportunities remain in the late-stage pipeline.`,
-    `${pipeline.newEnterprise.length} new or newly important enterprise opportunities are visible.`,
+    `The top of funnel continues to replenish with ${pipeline.newEnterprise.length} new or newly important enterprise opportunities.`,
     `CMO dinners have produced ${pipeline.dinnerFollowUps.length} qualified follow-up meetings across ${dinnerMarkets.length || 1} market${dinnerMarkets.length === 1 ? "" : "s"}.`,
   ];
   const progressLines = progressLinesFor(pipeline, movement);
@@ -95,14 +69,14 @@ export function buildCeoSalesReport({
     `CMO dinners are working as an enterprise acquisition channel, with ${pipeline.dinnerFollowUps.length} follow-up meetings captured.`,
     `Two leads for CEO follow-up: ${ceoFollowUpNames(pipeline)}.`,
   ];
+  const cmoDinnerFollowUpLines = dinnerFollowUpLines(dinnerMarkets);
 
   const paragraphs = [
-    title,
-    `Modified ${reportDate()}`,
+    "Agent Sales Report",
     "Executive Summary",
     executiveSummary,
     "Pipeline Health",
-    `Overall Health: ${health}`,
+    `Overall Health: ${healthIcon(health)} ${health}`,
     "Key highlights",
     ...keyHighlights.map((line) => `- ${line}`),
     "Enterprise Pipeline Snapshot",
@@ -111,49 +85,50 @@ export function buildCeoSalesReport({
     ...progressLines,
     "Commercial Decision Required",
     commercialDecisionText(pipeline),
+    ...commercialDecisionLines(pipeline),
     "New Enterprise Opportunities",
     ...newEnterpriseRows.map((row) => row.join(" | ")),
     "Upcoming Enterprise Meetings",
     ...upcomingMeetingRows.map((row) => row.join(" | ")),
     "CMO Dinner Follow-ups",
-    ...dinnerRows.map((row) => row.join(" | ")),
+    "The dinner strategy continues to convert into qualified enterprise meetings.",
+    ...cmoDinnerFollowUpLines,
     "CEO Takeaways",
     ...ceoTakeaways.map((line) => `- ${line}`),
   ];
 
   const blocks = reportBlocks([
-    { type: "heading1", text: title },
-    { type: "text", text: `Modified ${reportDate()}` },
+    { type: "heading1", text: "Agent Sales Report" },
     { type: "heading2", text: "Executive Summary" },
     { type: "text", text: executiveSummary },
     { type: "divider" },
-    { type: "heading2", text: "Pipeline Health" },
-    { type: "heading3", text: `Overall Health: ${health}` },
+    { type: "heading1", text: "Pipeline Health" },
+    { type: "heading3", text: `Overall Health: ${healthIcon(health)} ${health}` },
     { type: "text", text: "Key highlights" },
     ...keyHighlights.map((text) => ({ type: "text" as const, text: `- ${text}` })),
     { type: "divider" },
-    { type: "heading2", text: "Enterprise Pipeline Snapshot" },
+    { type: "heading1", text: "Enterprise Pipeline Snapshot" },
     { type: "table", rows: snapshotRows },
     { type: "divider" },
-    { type: "heading2", text: "Pipeline Progress Since Last Update" },
+    { type: "heading1", text: "Pipeline Progress Since Last Update" },
     ...progressBlocks(progressLines),
     { type: "divider" },
-    { type: "heading2", text: "Commercial Decision Required" },
+    { type: "heading1", text: "Commercial Decision Required" },
     { type: "text", text: commercialDecisionText(pipeline) },
-    ...rowsToBullets(decisionRows),
+    ...commercialDecisionLines(pipeline).map((text) => ({ type: "text" as const, text })),
     { type: "divider" },
-    { type: "heading2", text: "New Enterprise Opportunities" },
+    { type: "heading1", text: "New Enterprise Opportunities" },
     ...rowsToBullets(newEnterpriseRows),
     { type: "divider" },
-    { type: "heading2", text: "Upcoming Enterprise Meetings" },
-    { type: "text", text: "Calls we are excited about." },
+    { type: "heading1", text: "Upcoming Enterprise Meetings" },
+    { type: "text", text: `${pipeline.upcomingMeetings.length} enterprise conversations have been scheduled. Calls we are excited about.` },
     ...rowsToBullets(upcomingMeetingRows),
     { type: "divider" },
-    { type: "heading2", text: "CMO Dinner Follow-ups" },
+    { type: "heading1", text: "CMO Dinner Follow-ups" },
     { type: "text", text: "The dinner strategy continues to convert into qualified enterprise meetings." },
-    ...rowsToBullets(dinnerRows),
+    ...cmoDinnerBlocks(dinnerMarkets),
     { type: "divider" },
-    { type: "heading2", text: "CEO Takeaways" },
+    { type: "heading1", text: "CEO Takeaways" },
     ...ceoTakeaways.map((text) => ({ type: "text" as const, text: `- ${text}` })),
   ]);
 
@@ -169,7 +144,10 @@ export function buildCeoSalesReport({
 function progressBlocks(lines: string[]): LarkReportBlock[] {
   return lines.map((text) => {
     if (text === "Agreement Stage" || text === "Hot Opportunities") {
-      return { type: "heading3", text };
+      return {
+        type: "heading2",
+        text: text === "Agreement Stage" ? "🟣 Agreement Stage" : "🔴 Hot Opportunities",
+      };
     }
 
     if (text.startsWith("- ")) {
@@ -178,6 +156,63 @@ function progressBlocks(lines: string[]): LarkReportBlock[] {
 
     return { type: "text", text };
   });
+}
+
+function healthIcon(health: string) {
+  return health === "Strong" ? "🟢" : "🟡";
+}
+
+function commercialDecisionLines(pipeline: PipelineSet) {
+  const lines: string[] = [];
+
+  if (pipeline.feeConcern.length) {
+    lines.push("Affected opportunities:");
+    lines.push(...pipeline.feeConcern.slice(0, 6).map((deal) => `- ${cleanName(deal.account)}`));
+  }
+
+  const ceoFollowUp = ceoFollowUpNames(pipeline);
+  if (ceoFollowUp !== "none identified") {
+    lines.push(`CEO follow-up: ${ceoFollowUp}`);
+  }
+
+  return lines;
+}
+
+function dinnerFollowUpLines(dinnerMarkets: Array<[string, SalesDeal[]]>) {
+  return dinnerMarkets.flatMap(([market, marketDeals]) => [
+    marketLabel(market),
+    ...marketDeals.slice(0, 8).map((deal) => `- ${cleanName(deal.account)}${dinnerAction(deal)}`),
+    `Total: ${marketDeals.length} follow-up meeting${marketDeals.length === 1 ? "" : "s"}`,
+  ]);
+}
+
+function cmoDinnerBlocks(dinnerMarkets: Array<[string, SalesDeal[]]>): LarkReportBlock[] {
+  return dinnerMarkets.flatMap(([market, marketDeals]) => [
+    { type: "heading3" as const, text: marketLabel(market) },
+    ...marketDeals.slice(0, 8).map((deal) => ({
+      type: "text" as const,
+      text: `- ${cleanName(deal.account)}${dinnerAction(deal)}`,
+    })),
+    {
+      type: "text" as const,
+      text: `Total: ${marketDeals.length} follow-up meeting${marketDeals.length === 1 ? "" : "s"}`,
+    },
+  ]);
+}
+
+function marketLabel(market: string) {
+  const normalized = market.toLowerCase();
+  if (normalized.includes("tel aviv")) return "🇮🇱 Tel Aviv";
+  if (normalized.includes("singapore")) return "🇸🇬 Singapore";
+  if (normalized.includes("miami") || normalized.includes("us")) return "🇺🇸 Miami";
+  return market;
+}
+
+function dinnerAction(deal: SalesDeal) {
+  const signal = [deal.followUp, deal.nextStepsStatus, deal.finalVerdict, deal.callStage]
+    .find((value) => value && value !== "5" && value !== "No Action" && value !== "Blank");
+
+  return signal ? ` — ${signal}` : "";
 }
 
 function rowsToBullets(rows: string[][]): LarkReportBlock[] {

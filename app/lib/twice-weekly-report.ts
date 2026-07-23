@@ -41,7 +41,7 @@ export async function createTwiceWeeklySalesReport({
   }
 
   const document = await createLarkDocument({
-    title: `Sales Pulse - ${report.title.replace(/^CEO Sales Brief -\s*/, "")}`,
+    title: report.title,
   });
   let writeMode = "text-blocks";
   let writeError = "";
