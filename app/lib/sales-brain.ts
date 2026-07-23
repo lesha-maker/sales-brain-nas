@@ -785,11 +785,17 @@ function formatDetailedCallItem(deal: SalesDeal) {
   );
   const details = [
     deal.firstMeetingDate ? `time ${friendlyDateTime(deal.firstMeetingDate)}` : "",
+    usableField(deal.website) ? `website ${deal.website}` : "website not in CRM",
     deal.budget && deal.budget !== "Unknown" ? `budget ${deal.budget}` : "budget unknown",
     qualifierNotes ? `qualifier notes: ${qualifierNotes}` : "qualifier notes: none in CRM",
   ];
 
   return `- ${deal.account}: ${details.join("; ")}`;
+}
+
+function usableField(value: string) {
+  const normalized = value.trim();
+  return Boolean(normalized && normalized !== "5");
 }
 
 function compactNote(value: string) {
