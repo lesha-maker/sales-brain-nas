@@ -338,8 +338,7 @@ async function maybeHandleMondayWrite({
   }
 
   const deal = matches[0];
-
-  await setPendingMondayAction(threadId, {
+  const action = {
     id: `${Date.now()}-${deal.id}`,
     createdAt: new Date().toISOString(),
     boardId: deal.boardId || boardId,
@@ -348,7 +347,13 @@ async function maybeHandleMondayWrite({
     email: deal.email,
     description: updateIntent.description,
     columnValues: columnValuesForUpdateIntent(updateIntent, deal),
-  });
+  } satisfies PendingMondayAction;
+
+  if (hasApprovalLanguage(question)) {
+    return executePendingMondayAction({ threadId, action });
+  }
+
+  await setPendingMondayAction(threadId, action);
 
   const currentStage = [deal.callStage, deal.nextStepsStatus, deal.finalVerdict]
     .filter((value) => value && value !== "5")
@@ -496,8 +501,12 @@ function isConfirmation(question: string) {
     return false;
   }
 
-  return /\b(yes|yep|yeah|confirm|approved|approve|do it|go ahead|ok|okay)\b/i.test(
-    normalized,
+  return hasApprovalLanguage(normalized);
+}
+
+function hasApprovalLanguage(question: string) {
+  return /\b(yes|yep|yeah|confirm|approved|approve|do it|go ahead|ok|okay|please do it|pls do it)\b/i.test(
+    question,
   );
 }
 
@@ -545,8 +554,8 @@ function mondayUpdateIntent(
   const mentionsAgreement = combined.includes("agreement");
   const mentionsMeetingBooked =
     /\b(meeting booked|booked meeting|booked a meeting)\b/.test(combined);
-  const currentMessageHasUpdateVerb = /\b(move|update|change|set|put)\b/.test(normalized);
-  const recentMessageHadUpdateVerb = /\b(move|update|change|set|put)\b/.test(recentUserText);
+  const currentMessageHasUpdateVerb = /\b(move|update|change|set|put|make)\b/.test(normalized);
+  const recentMessageHadUpdateVerb = /\b(move|update|change|set|put|make)\b/.test(recentUserText);
   const currentMessageLooksLikeSelection = searchTokens(normalized).length > 0;
   const currentMessageLooksShort = searchTokens(normalized).length <= 3;
   const isUpdate =
