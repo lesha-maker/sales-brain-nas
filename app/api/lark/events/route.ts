@@ -252,7 +252,18 @@ function removeBotMentions(text: string) {
 }
 
 function conversationThreadId(message: NonNullable<LarkEventPayload["event"]>["message"]) {
-  // Keep group replies and the main room in one memory stream.
+  // Group chats need thread-scoped memory so replies continue the specific CRM action.
+  if (isGroupChat(message?.chat_type)) {
+    return (
+      message?.root_id ||
+      message?.parent_id ||
+      message?.message_id ||
+      message?.chat_id ||
+      "lark-default-thread"
+    );
+  }
+
+  // Direct messages should behave like one ongoing chat.
   return (
     message?.chat_id ||
     message?.root_id ||
