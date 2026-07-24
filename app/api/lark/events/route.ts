@@ -586,11 +586,17 @@ function isSalesMemoryCaptureIntent(question: string) {
       normalized,
     );
   const hasSalesSubject =
-    /\b(lead|client|customer|deal|sales|crm|monday|proposal|pricing|budget|decision maker|objection|next step|follow up|agreement|close|closing)\b/.test(
+    /\b(lead|client|customer|deal|sales|crm|monday|proposal|pricing|budget|decision maker|objection|next step|follow up|agreement|close|closing|meeting|call)\b/.test(
       normalized,
     );
+  const hasMeetingOutcome =
+    /\b(had|has|went|was|is|booked|scheduled|completed)\b/.test(normalized) &&
+    /\b(good|great|positive|bad|second|2nd|next|follow[- ]?up|another|booked|scheduled)\b/.test(
+      normalized,
+    ) &&
+    /\b(meeting|call)\b/.test(normalized);
 
-  return hasMemoryVerb && hasSalesSubject;
+  return (hasMemoryVerb && hasSalesSubject) || hasMeetingOutcome;
 }
 
 function extractSalesMemoryNote(question: string) {
