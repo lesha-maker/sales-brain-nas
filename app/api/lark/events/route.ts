@@ -136,7 +136,13 @@ export async function POST(request: NextRequest) {
       contextNotes,
     }));
 
-  if (message.chat_id) {
+  if (isGroupChat(message.chat_type)) {
+    await replyToLarkMessage({
+      messageId,
+      text: answer,
+      replyInThread: true,
+    });
+  } else if (message.chat_id) {
     await sendLarkTextReport({
       chatId: message.chat_id,
       text: answer,
