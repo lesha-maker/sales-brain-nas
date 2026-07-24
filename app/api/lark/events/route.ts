@@ -402,7 +402,44 @@ async function maybeHandleMondayWrite({
   const updateIntent = mondayUpdateIntent(question, conversation);
 
   if (!updateIntent) {
-    return "";
+    const threadNoteIntent = mondayThreadNoteIntent(question);
+
+    if (!threadNoteIntent) {
+      return "";
+    }
+
+    const matches = findDealMatches({ question, conversation, deals }).slice(0, 5);
+
+    if (!matches.length) {
+      await clearPendingMondayAction(threadId);
+      return "";
+    }
+
+    if (matches.length > 1) {
+      await clearPendingMondayAction(threadId);
+      const names = matches.map(formatDealOption).join("; ");
+      return `I found multiple matching records: ${names}. Which one should I update?`;
+    }
+
+    const deal = matches[0];
+    const action = {
+      id: `${Date.now()}-${deal.id}`,
+      createdAt: new Date().toISOString(),
+      boardId: deal.boardId || boardId,
+      itemId: deal.id,
+      account: deal.account,
+      email: deal.email,
+      description: "added a monday thread note",
+      updateBody: `Sales Brain note from Lark:\n\n${threadNoteIntent.note}`,
+    } satisfies PendingMondayAction;
+
+    if (hasApprovalLanguage(question)) {
+      return executePendingMondayAction({ threadId, action });
+    }
+
+    await setPendingMondayAction(threadId, action);
+
+    return `I found ${formatSelectedDeal(deal)}. Reply yes to confirm, and I'll add this note to the monday thread: "${threadNoteIntent.note}".`;
   }
 
   const matches = findDealMatches({ question, conversation, deals }).slice(0, 5);
@@ -688,6 +725,23 @@ function mondayUpdateIntent(
   return null;
 }
 
+function mondayThreadNoteIntent(question: string) {
+  const normalized = question.toLowerCase();
+
+  if (
+    !/\b(comment|note|update)\b/.test(normalized) ||
+    !/\b(thread|monday|crm)\b/.test(normalized)
+  ) {
+    return null;
+  }
+
+  const note = extractMondayThreadNote(question);
+
+  if (!note) return null;
+
+  return { note };
+}
+
 function columnValuesForUpdateIntent(
   updateIntent: NonNullable<ReturnType<typeof mondayUpdateIntent>>,
   deal: SalesDeal,
@@ -721,6 +775,19 @@ function updateBodyForIntent(
 function extractMondayUpdateNote(question: string) {
   const match = question.match(/\b(?:notes?|thread)\s*:\s*(.+)$/i);
   return match?.[1]?.trim() || "";
+}
+
+function extractMondayThreadNote(question: string) {
+  const explicit = question.match(/\b(?:notes?|comment|thread)\s*:\s*(.+)$/i);
+  if (explicit?.[1]?.trim()) return explicit[1].trim();
+
+  const natural = question.match(
+    /\b(?:put|add|post|write|leave)\s+(?:a\s+)?(?:comment|note|update)\s+(?:in|on|to)\s+(?:the\s+)?(?:monday\s+|crm\s+)?thread\s+(?:that\s+)?(.+)$/i,
+  );
+  if (natural?.[1]?.trim()) return natural[1].trim();
+
+  const trailing = question.match(/\b(?:comment|note|update)\s+(?:that\s+)?(.+)$/i);
+  return trailing?.[1]?.trim() || "";
 }
 
 function callStageColumnIdFor(deal: SalesDeal) {
@@ -902,27 +969,38 @@ function searchTokens(text: string) {
   const stopWords = new Set([
     "agreement",
     "action",
+    "add",
     "booked",
     "board",
     "called",
     "cmo",
+    "comment",
     "confirm",
     "company",
+    "crm",
     "dinner",
     "from",
+    "good",
+    "great",
     "lead",
     "meeting",
     "monday",
     "move",
     "make",
     "no",
+    "note",
+    "notes",
     "one",
     "please",
+    "put",
+    "reply",
     "stage",
     "status",
     "that",
+    "thread",
     "update",
     "website",
+    "with",
     "yes",
   ]);
 
